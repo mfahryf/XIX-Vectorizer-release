@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "test:ui": "node --test licensing-ui.test.js"
+    "test:ui": "node --test licensing-ui.test.js license-modal-structure.test.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"

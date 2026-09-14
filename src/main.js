@@ -859,7 +859,10 @@ $("btn-adv").onclick = () => {
 };
 
 // ---------------- settings modal (proxy) ----------------
+let lastLicenseTrigger = null;
+
 function openModal() {
+  closeLicenseModal();
   ddProxyMode.setValue(state.proxy.mode);
   $("proxy-list").value = state.proxy.list.join("\n");
   $("hproxy-key").value = state.proxy.key;
@@ -868,6 +871,43 @@ function openModal() {
 function closeModal() {
   $("modal-overlay").classList.add("hidden");
 }
+
+function openLicenseModal() {
+  closeModal();
+  lastLicenseTrigger = $("btn-license");
+  const overlay = $("license-modal-overlay");
+  overlay.classList.remove("hidden");
+  overlay.setAttribute("aria-hidden", "false");
+  $("license-key").focus();
+}
+
+function closeLicenseModal() {
+  const overlay = $("license-modal-overlay");
+  if (overlay.classList.contains("hidden")) return;
+  overlay.classList.add("hidden");
+  overlay.setAttribute("aria-hidden", "true");
+  if (lastLicenseTrigger) lastLicenseTrigger.focus();
+  lastLicenseTrigger = null;
+}
+
+function trapLicenseModalFocus(event) {
+  if (event.key !== "Tab") return;
+  const focusable = [
+    $("license-close"),
+    $("license-refresh"),
+    $("license-key"),
+    $("license-activate"),
+  ].filter((element) => element && !element.disabled);
+  if (!focusable.length) return;
+
+  const currentIndex = focusable.indexOf(document.activeElement);
+  const nextIndex = event.shiftKey
+    ? (currentIndex <= 0 ? focusable.length - 1 : currentIndex - 1)
+    : (currentIndex === focusable.length - 1 ? 0 : currentIndex + 1);
+  event.preventDefault();
+  focusable[nextIndex].focus();
+}
+
 $("proxy-close").onclick = closeModal;
 $("modal-overlay").addEventListener("mousedown", (e) => {
   if (e.target === $("modal-overlay")) closeModal();
@@ -883,6 +923,21 @@ $("proxy-save").onclick = () => {
   saveConfig();
 };
 $("btn-settings").onclick = openModal;
+$("btn-license").onclick = openLicenseModal;
+$("license-close").onclick = closeLicenseModal;
+$("license-modal").addEventListener("keydown", trapLicenseModalFocus);
+$("license-modal-overlay").addEventListener("mousedown", (e) => {
+  if (e.target === $("license-modal-overlay")) closeLicenseModal();
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    if (!$("license-modal-overlay").classList.contains("hidden")) {
+      closeLicenseModal();
+      return;
+    }
+    if (!$("modal-overlay").classList.contains("hidden")) closeModal();
+  }
+});
 
 // ---------------- config persistence ----------------
 async function saveConfig() {
