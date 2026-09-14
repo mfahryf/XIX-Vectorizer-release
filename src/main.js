@@ -4,11 +4,15 @@ const { invoke } = window.__TAURI__.core;
 const { listen } = window.__TAURI__.event;
 const { getCurrentWindow } = window.__TAURI__.window;
 const { open } = window.__TAURI__.dialog;
+const openUrl = window.__TAURI__.opener?.openUrl;
 
 const $ = (id) => document.getElementById(id);
 const win = getCurrentWindow();
 
 const APP_PALETTE = "sunset";
+// Sandbox checkout for the current Vectorizer product. Replace this public
+// URL at the production cutover; never put Mayar credentials in the desktop.
+const LICENSE_PURCHASE_URL = "https://web.mayar.club/payment-link/24f597d6-9505-4d30-9412-7d664a4309df";
 
 const state = {
   engine: null,
@@ -89,6 +93,28 @@ async function activateLicense() {
     $("license-status").textContent = String(error || "Aktivasi lisensi gagal.");
   } finally {
     $("license-activate").disabled = false;
+  }
+}
+async function openLicensePurchase() {
+  const licenseBuy = $("license-buy");
+  if (!openUrl) {
+    $("license-status").textContent = "Halaman pembelian belum dapat dibuka.";
+    return;
+  }
+  licenseBuy.disabled = true;
+  licenseBuy.setAttribute("aria-busy", "true");
+  licenseBuy.textContent = "Opening…";
+  $("license-status").textContent = "Membuka halaman lisensi…";
+  try {
+    await openUrl(LICENSE_PURCHASE_URL);
+    setStatus("HALAMAN LISENSI DIBUKA", false);
+  } catch (error) {
+    $("license-status").textContent = "Halaman pembelian belum dapat dibuka.";
+    console.warn("license purchase unavailable", error);
+  } finally {
+    licenseBuy.disabled = false;
+    licenseBuy.removeAttribute("aria-busy");
+    licenseBuy.textContent = "Get License";
   }
 }
 function setSeek(pct) {
@@ -385,14 +411,19 @@ ddProxyMode.setOptions([
   { value: "free", label: "Gratis otomatis (HProxy+ProxyScrape)" },
 ]);
 async function loadEngines() {
-  state.engines = await invoke("list_engines");
+  state.engines = window.XixEngineUI.sortEngines(await invoke("list_engines"));
   if (!state.engines.length) {
     setLcd("NO ENGINE");
     return;
   }
-  ddEngine.setOptions(state.engines.map((e) => ({ value: e.id, label: e.name })));
+  ddEngine.setOptions(
+    state.engines.map((e) => ({
+      value: e.id,
+      label: window.XixEngineUI.formatEngineLabel(e),
+    })),
+  );
   ddEngine.onChange = (v) => selectEngine(v);
-  selectEngine(state.engines[0].id); // default = first (v2)
+  selectEngine(state.engines[0].id); // default = first (v1)
 }
 function selectEngine(id) {
   state.engine = state.engines.find((e) => e.id === id) || state.engines[0];
@@ -897,6 +928,7 @@ function trapLicenseModalFocus(event) {
     $("license-refresh"),
     $("license-key"),
     $("license-activate"),
+    $("license-buy"),
   ].filter((element) => element && !element.disabled);
   if (!focusable.length) return;
 
@@ -925,6 +957,7 @@ $("proxy-save").onclick = () => {
 $("btn-settings").onclick = openModal;
 $("btn-license").onclick = openLicenseModal;
 $("license-close").onclick = closeLicenseModal;
+$("license-buy").onclick = openLicensePurchase;
 $("license-modal").addEventListener("keydown", trapLicenseModalFocus);
 $("license-modal-overlay").addEventListener("mousedown", (e) => {
   if (e.target === $("license-modal-overlay")) closeLicenseModal();

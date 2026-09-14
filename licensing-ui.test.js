@@ -43,8 +43,16 @@ test("fresh installs explain that processing activates the trial", () => {
   assert.equal(view.canProcess, false);
   assert.equal(view.canStart, true);
   assert.equal(view.badge, "NOT ACTIVATED");
-  assert.match(view.message, /file pertama/i);
+  assert.equal(view.message, "Process the first file to activate your online trial.");
   assert.equal(view.deviceState, "unregistered");
+});
+
+test("trial copy uses the polished English wording", () => {
+  const view = deriveLicenseView({
+    license_state: "trial",
+    trial_remaining_by_engine: { "vectorize-v1": 5, "vectorize-v2": 5, pngtosvg: 5 },
+  });
+  assert.equal(view.message, "Trial: 5 successful files per engine.");
 });
 
 test("device identity loss exposes recovery code and contact metadata", () => {

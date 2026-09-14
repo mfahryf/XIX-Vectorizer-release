@@ -36,7 +36,7 @@ lainnya.
 
 1. Selesaikan pembayaran bulanan melalui alur XIXLabs.
 2. Salin license key yang ditampilkan atau dikirim melalui email.
-3. Buka panel `LICENSE`, masukkan key, lalu pilih `AKTIFKAN`.
+3. Buka panel `LICENSE`, masukkan key, lalu pilih `ACTIVATE`.
 4. Satu lisensi hanya memiliki satu device binding aktif.
 5. Penggantian komputer dilakukan oleh admin dengan mereset binding perangkat
    di layanan lisensi. Menghapus file lokal tidak mereset binding server.
@@ -83,6 +83,8 @@ Format lengkap request, response, lease, token trial, dan error ada di
 [`docs/DESKTOP-LICENSING-CONTRACT.md`](docs/DESKTOP-LICENSING-CONTRACT.md).
 Cara menjalankan dan memeriksa alur lisensi tanpa membuat installer ada di
 [`docs/DEVELOPMENT-LICENSE-TESTING.md`](docs/DEVELOPMENT-LICENSE-TESTING.md).
+Aturan tampilan desktop lintas aplikasi XIXLabs ada di
+[`docs/XIX-DESKTOP-UI-STANDARD.md`](docs/XIX-DESKTOP-UI-STANDARD.md).
 
 ### Checklist verifikasi rilis
 

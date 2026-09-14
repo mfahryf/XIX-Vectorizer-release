@@ -5,9 +5,12 @@
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "test:ui": "node --test licensing-ui.test.js license-modal-structure.test.js"
+    "test:ui": "node --test licensing-ui.test.js license-modal-structure.test.js desktop-branding-structure.test.js engine-ui.test.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
+  },
+  "dependencies": {
+    "@tauri-apps/plugin-opener": "^2.5.5"
   }
 }

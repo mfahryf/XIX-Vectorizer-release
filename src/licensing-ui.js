@@ -22,10 +22,10 @@
     let message = "Hubungkan internet untuk memvalidasi lisensi.";
     if (state === "unactivated") {
       badge = "NOT ACTIVATED";
-      message = "Proses file pertama untuk mengaktifkan trial online.";
+      message = "Process the first file to activate your online trial.";
     } else if (state === "trial") {
       badge = "TRIAL";
-      message = hasTrial ? "Trial: 5 file berhasil per engine." : "Trial habis. Aktifkan lisensi untuk melanjutkan.";
+      message = hasTrial ? "Trial: 5 successful files per engine." : "Trial exhausted. Activate a license to continue.";
     } else if (state === "licensed") {
       badge = "LICENSED";
       message = "Lisensi aktif.";
