@@ -74,12 +74,15 @@ HTTPS. Endpoint yang digunakan:
 Setiap request memakai challenge sekali-pakai dari gateway. Signature mencakup
 canonical JSON `{"challenge":"...","device_id":"..."}`; tidak ada envelope
 `payload/nonce`. Desktop tidak menyimpan API key Mayar, Google Auth secret,
-atau private key penandatangan lease gateway. Build rilis harus menyertakan
-public verification key gateway melalui konfigurasi build
-`XIX_GATEWAY_PUBLIC_KEY_B64`; nilai ini adalah public key, bukan secret.
+atau private key penandatangan lease gateway. Binary membawa public verification
+key gateway yang dipin di source. `XIX_GATEWAY_PUBLIC_KEY_B64` hanya dipakai
+sebagai override saat rotasi key yang direncanakan; nilainya adalah public key,
+bukan secret.
 
 Format lengkap request, response, lease, token trial, dan error ada di
 [`docs/DESKTOP-LICENSING-CONTRACT.md`](docs/DESKTOP-LICENSING-CONTRACT.md).
+Cara menjalankan dan memeriksa alur lisensi tanpa membuat installer ada di
+[`docs/DEVELOPMENT-LICENSE-TESTING.md`](docs/DEVELOPMENT-LICENSE-TESTING.md).
 
 ### Checklist verifikasi rilis
 

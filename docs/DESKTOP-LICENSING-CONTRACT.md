@@ -71,7 +71,8 @@ langsung, bukan envelope `{payload, nonce}`. Urutannya:
 3. Kirim ulang identitas, challenge, signature, platform, dan versi aplikasi.
 
 Client memverifikasi token trial dan nested lease memakai public key gateway
-yang dipasang saat build. Server tidak pernah mengirim Mayar key atau secret
+yang dipin di binary. `XIX_GATEWAY_PUBLIC_KEY_B64` hanya override build untuk
+rotasi key yang disengaja. Server tidak pernah mengirim Mayar key atau secret
 signing private ke desktop.
 
 ## Checklist rilis
