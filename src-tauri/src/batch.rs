@@ -281,14 +281,12 @@ where
                 if cancel.load(Ordering::Relaxed) || stop.load(Ordering::Relaxed) {
                     return;
                 }
-                let claimed = {
-                    let mut q = queue.lock();
-                    q.pop_front()
-                };
-                let Some(file) = claimed else { return };
-                if delay_secs > 0.0 {
+                let file = if delay_secs > 0.0 {
                     loop {
                         if cancel.load(Ordering::Relaxed) || stop.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        if queue.lock().is_empty() {
                             return;
                         }
                         let now_ms = std::time::SystemTime::now()
@@ -306,12 +304,24 @@ where
                                 )
                                 .is_ok()
                         {
-                            break;
+                            let claimed = {
+                                let mut q = queue.lock();
+                                q.pop_front()
+                            };
+                            let Some(claimed) = claimed else { return };
+                            break claimed;
                         }
                         let wait_ms = target_ms.saturating_sub(now_ms);
                         tokio::time::sleep(std::time::Duration::from_millis(wait_ms.min(50))).await;
                     }
-                }
+                } else {
+                    let claimed = {
+                        let mut q = queue.lock();
+                        q.pop_front()
+                    };
+                    let Some(claimed) = claimed else { return };
+                    claimed
+                };
                 let file_name = file
                     .0
                     .file_name()
