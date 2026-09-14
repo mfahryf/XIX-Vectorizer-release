@@ -20,6 +20,8 @@ const state = {
   bgFx: "none",
   palette: APP_PALETTE,
   errCount: 0,
+  license: null,
+  licenseView: null,
 };
 
 // ---------------- LCD / status helpers ----------------
@@ -28,6 +30,64 @@ function setLcd(text) {
 }
 function setStatus(text, isErr) {
   setLcd(text);
+}
+function renderLicenseStatus(status) {
+  state.license = status;
+  state.licenseView = window.XixLicensingUI.deriveLicenseView(status);
+  const view = state.licenseView;
+  $("license-badge").textContent = view.badge;
+  $("license-status").textContent = view.message;
+  $("license-panel").classList.toggle("license-locked", !view.canProcess);
+  $("license-trial-v1").textContent = `V1: ${view.engineCounters[0].remaining}/5`;
+  $("license-trial-v2").textContent = `V2: ${view.engineCounters[1].remaining}/5`;
+  $("license-trial-v3").textContent = `V3: ${view.engineCounters[2].remaining}/5`;
+  const offline = view.offlineDaysRemaining == null ? "" : ` · offline ${view.offlineDaysRemaining} hari`;
+  $("license-help").textContent = view.canProcess
+    ? `${view.message}${offline}`
+    : "Pemrosesan terkunci; file lama, pengaturan, dan bantuan tetap tersedia.";
+  if (!state.running) setEnabled($("btn-start"), view.canProcess);
+}
+async function loadLicenseStatus() {
+  try {
+    const status = await invoke("license_status");
+    renderLicenseStatus(status);
+    if (status.license_state === "licensed-offline" && (status.offline_days_remaining || 0) <= 2) {
+      await refreshLicense(false);
+    }
+  } catch (error) {
+    renderLicenseStatus({ license_state: "unavailable", trial_remaining_by_engine: {} });
+    $("license-status").textContent = "Status lisensi belum dapat diperiksa.";
+    console.warn("license status unavailable", error);
+  }
+}
+async function refreshLicense(showMessage = true) {
+  try {
+    const status = await invoke("refresh_license");
+    renderLicenseStatus(status);
+    if (showMessage) setStatus("LISENSI DIVALIDASI", false);
+  } catch (error) {
+    if (showMessage) setStatus("VALIDASI LISENSI GAGAL", true);
+    $("license-status").textContent = "Hubungkan internet atau periksa license key.";
+  }
+}
+async function activateLicense() {
+  const input = $("license-key");
+  const licenseKey = input.value.trim();
+  if (!licenseKey) {
+    $("license-status").textContent = "Masukkan license key dari email pembayaran.";
+    return;
+  }
+  $("license-activate").disabled = true;
+  try {
+    const status = await invoke("activate_license", { licenseKey });
+    input.value = "";
+    renderLicenseStatus(status);
+    setStatus("LISENSI AKTIF", false);
+  } catch (error) {
+    $("license-status").textContent = String(error || "Aktivasi lisensi gagal.");
+  } finally {
+    $("license-activate").disabled = false;
+  }
 }
 function setSeek(pct) {
   const p = Math.max(0, Math.min(100, Math.round(pct)));
@@ -223,7 +283,7 @@ function setRunState(phase) {
   const body = document.body;
   body.classList.toggle("running", phase === "running" || phase === "paused");
   body.classList.toggle("paused", phase === "paused");
-  setEnabled($("btn-start"), phase === "idle");
+  setEnabled($("btn-start"), phase === "idle" && (!state.licenseView || state.licenseView.canProcess));
   setEnabled($("btn-pause"), phase === "running" || phase === "paused");
   setEnabled($("btn-stop"), phase === "running" || phase === "paused");
   $("btn-pause").title =
@@ -643,6 +703,22 @@ async function start() {
     setLcd("READY");
     return;
   }
+  try {
+    const decision = await invoke("license_preflight", {
+      engineId: state.engine.id,
+      requestedFiles: state.files.length,
+    });
+    if (!decision.allowed) {
+      setStatus(decision.message || "PEMROSESAN TERKUNCI", true);
+      if (state.license) {
+        renderLicenseStatus({ ...state.license, license_state: decision.state, reason: decision.message });
+      }
+      return;
+    }
+  } catch (error) {
+    setStatus(String(error || "LISENSI BELUM TERVERIFIKASI"), true);
+    return;
+  }
   state.running = true;
   state.paused = false;
   updateErrCount(0); // hitungan error baru per sesi proses
@@ -907,6 +983,12 @@ listen("batch://done", (e) => {
   $("cm-all").onclick = clearPlaylist;
   $("cm-done").onclick = clearFinished;
   $("btn-bg-fx").onclick = cycleBgFx;
+  $("license-refresh").onclick = () => refreshLicense(true);
+  $("license-activate").onclick = activateLicense;
+  $("license-key").addEventListener("keydown", (event) => {
+    if (event.key === "Enter") activateLicense();
+  });
   setRunState("idle");
   setSeek(0);
+  await loadLicenseStatus();
 })();

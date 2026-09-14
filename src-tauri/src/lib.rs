@@ -2,14 +2,16 @@ pub mod batch;
 pub mod config;
 pub mod engines;
 pub mod img;
+pub mod licensing;
 pub mod net;
 pub mod secure;
-pub mod tor;
 pub mod svg;
+pub mod tor;
 
 use crate::batch::run_batch;
 use crate::config::{load as config_load, save as config_save, AppConfig};
 use crate::engines::{common_batch_options, EngineOptions, OptionDef};
+use crate::licensing::{AccessDecision, LicenseStatus, LicensingState};
 use crate::net::freeproxy::{self, Candidate};
 use crate::tor::{resolve_runtime, TorManager, TorRuntimePaths};
 use parking_lot::Mutex;
@@ -82,11 +84,7 @@ impl BatchStart {
         self,
         state: &BatchState,
     ) -> Result<(Arc<AtomicBool>, Arc<AtomicBool>), String> {
-        let active_generation = state
-            .active
-            .lock()
-            .as_ref()
-            .map(|active| active.generation);
+        let active_generation = state.active.lock().as_ref().map(|active| active.generation);
         if active_generation != Some(self.generation) {
             return Err("batch start was superseded".into());
         }
@@ -131,7 +129,10 @@ fn finish_tor_preparation<T>(
 }
 
 fn config_path(app: &AppHandle) -> Option<PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("config.json"))
+    app.path()
+        .app_config_dir()
+        .ok()
+        .map(|d| d.join("config.json"))
 }
 
 /// Scan `dir` for files whose extension is in `exts` (default: images).
@@ -175,7 +176,10 @@ fn list_engines() -> Vec<EngineInfo> {
 #[tauri::command]
 fn scan_dir(path: String, exts: Option<Vec<String>>) -> Result<Vec<FileInfo>, String> {
     let exts = exts.unwrap_or_else(|| {
-        ["jpg", "jpeg", "png", "webp"].iter().map(|s| s.to_string()).collect()
+        ["jpg", "jpeg", "png", "webp"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect()
     });
     Ok(scan_files(Path::new(&path), &exts)?
         .into_iter()
@@ -216,10 +220,7 @@ fn needs_free(options: &EngineOptions) -> bool {
 /// gratis diambil di sini lalu opsi ditulis-ulang ke mode `user` beserta
 /// `proxy_list`, sehingga engine mengonsumsinya lewat alur rotator yang sudah
 /// ada. Daftar kosong atau gagal ambil menolak sebelum batch di-spawn.
-async fn translate_free_mode<F, Fut>(
-    options: &mut EngineOptions,
-    fetcher: F,
-) -> Result<(), String>
+async fn translate_free_mode<F, Fut>(options: &mut EngineOptions, fetcher: F) -> Result<(), String>
 where
     F: FnOnce() -> Fut,
     Fut: Future<Output = Result<Vec<Candidate>, String>>,
@@ -239,10 +240,7 @@ where
 }
 
 /// Fetcher produksi: client reqwest biasa + kunci HProxy dari konfigurasi.
-async fn prepare_free_options(
-    options: &mut EngineOptions,
-    app: &AppHandle,
-) -> Result<(), String> {
+async fn prepare_free_options(options: &mut EngineOptions, app: &AppHandle) -> Result<(), String> {
     let hproxy_api_key = config_path(app)
         .map(|path| config_load(&path).hproxy_api_key)
         .unwrap_or_default();
@@ -264,9 +262,25 @@ async fn start_batch(
     engine_id: String,
     mut options: EngineOptions,
     state: State<'_, BatchState>,
+    licensing: State<'_, LicensingState>,
     tor: State<'_, TorManager>,
     resources: State<'_, TorResources>,
 ) -> Result<(), String> {
+    if files.is_empty() {
+        return Err("no files to process".into());
+    }
+    if output.trim().is_empty() {
+        return Err("output folder is required".into());
+    }
+    if !engines::registry().iter().any(|e| e.id() == engine_id) {
+        return Err(format!("engine not found: {engine_id}"));
+    }
+    let decision = licensing
+        .manager
+        .preflight(&engine_id, files.len())
+        .await
+        .map_err(|error| error.to_string())?;
+    ensure_batch_allowed(&decision)?;
     let batch_start = state.begin_start();
     if needs_tor(&options) {
         let _ = app.emit(
@@ -282,14 +296,12 @@ async fn start_batch(
                 .app_data_dir()
                 .map_err(|error| format!("cannot resolve Tor data directory: {error}")),
         );
-        let (paths, data_dir) =
-            finish_tor_preparation(preparation, |status| {
-                let _ = app.emit("tor://status", status);
-            })?;
-        let endpoint =
-            finish_tor_preparation(tor.ensure_ready(paths, data_dir).await, |status| {
-                let _ = app.emit("tor://status", status);
-            })?;
+        let (paths, data_dir) = finish_tor_preparation(preparation, |status| {
+            let _ = app.emit("tor://status", status);
+        })?;
+        let endpoint = finish_tor_preparation(tor.ensure_ready(paths, data_dir).await, |status| {
+            let _ = app.emit("tor://status", status);
+        })?;
         inject_tor_addr(&mut options, &endpoint);
         let _ = app.emit(
             "tor://status",
@@ -302,11 +314,6 @@ async fn start_batch(
     if needs_free(&options) {
         prepare_free_options(&mut options, &app).await?;
     }
-    // Validasi dulu secara eager agar id tak dikenal ditolak lewat path
-    // Err normal invoke (bukan panic di dalam spawned task).
-    if !engines::registry().iter().any(|e| e.id() == engine_id) {
-        return Err(format!("engine not found: {engine_id}"));
-    }
     // Satu engine per worker dibangun dari registry yang sama; engine
     // stateless berbagi perilaku, state rotator tidak balapan antar worker.
     let engine_id_cl = engine_id.clone();
@@ -318,15 +325,14 @@ async fn start_batch(
             .expect("engine id tervalidasi di atas — unreachable backstop")
     };
     let files: Vec<PathBuf> = files.into_iter().map(PathBuf::from).collect();
-    if files.is_empty() {
-        return Err("no files to process".into());
-    }
     let out_dir = PathBuf::from(&output);
     std::fs::create_dir_all(&out_dir).map_err(|e| e.to_string())?;
 
     let (cancel, pause) = batch_start.into_controls(&state)?;
     let total = files.len();
     let emit_app = app.clone();
+    let usage_manager = licensing.manager.clone();
+    let usage_engine_id = engine_id.clone();
     tauri::async_runtime::spawn(async move {
         let (ok, fail) = run_batch(
             make_engines,
@@ -336,6 +342,19 @@ async fn start_batch(
             cancel,
             pause,
             move |ev| {
+                if let batch::BatchEvent::FileDone { input, output, .. } = &ev {
+                    if let Err(error) = usage_manager.record_success(
+                        &usage_engine_id,
+                        Path::new(input),
+                        Path::new(output),
+                    ) {
+                        eprintln!("LICENSE USAGE ERROR: {error}");
+                    }
+                    let sync_manager = usage_manager.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let _ = sync_manager.sync_pending_usage().await;
+                    });
+                }
                 let _ = emit_app.emit("batch://event", ev);
             },
         )
@@ -346,6 +365,57 @@ async fn start_batch(
         );
     });
     Ok(())
+}
+
+fn ensure_batch_allowed(decision: &AccessDecision) -> Result<(), String> {
+    if decision.allowed {
+        Ok(())
+    } else {
+        Err(decision.message.clone())
+    }
+}
+
+#[tauri::command]
+async fn license_status(state: State<'_, LicensingState>) -> Result<LicenseStatus, String> {
+    state
+        .manager
+        .status()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn activate_license(
+    state: State<'_, LicensingState>,
+    license_key: String,
+) -> Result<LicenseStatus, String> {
+    state
+        .manager
+        .activate(license_key)
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn refresh_license(state: State<'_, LicensingState>) -> Result<LicenseStatus, String> {
+    state
+        .manager
+        .refresh()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+async fn license_preflight(
+    state: State<'_, LicensingState>,
+    engine_id: String,
+    requested_files: usize,
+) -> Result<AccessDecision, String> {
+    state
+        .manager
+        .preflight(&engine_id, requested_files)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 #[tauri::command]
@@ -406,10 +476,7 @@ pub fn run() {
             // (resource dir in release; repo dir in dev when present).
             let node = [
                 app.path()
-                    .resolve(
-                        "pngtosvg-runtime/node/node.exe",
-                        BaseDirectory::Resource,
-                    )
+                    .resolve("pngtosvg-runtime/node/node.exe", BaseDirectory::Resource)
                     .ok(),
                 Some(PathBuf::from("pngtosvg-runtime/node/node.exe")),
                 Some(PathBuf::from("src-tauri/pngtosvg-runtime/node/node.exe")),
@@ -426,6 +493,12 @@ pub fn run() {
                 .and_then(|cwd| resolve_runtime(resource_root.as_deref(), &cwd));
             app.manage(TorResources { paths });
 
+            let app_data_dir = app
+                .path()
+                .app_data_dir()
+                .map_err(|error| format!("cannot resolve licensing data directory: {error}"))?;
+            app.manage(LicensingState::new(&app_data_dir).map_err(|error| error.to_string())?);
+
             Ok(())
         })
         .manage(BatchState::default())
@@ -438,7 +511,11 @@ pub fn run() {
             pause_batch,
             open_dir,
             get_config,
-            save_config
+            save_config,
+            license_status,
+            activate_license,
+            refresh_license,
+            license_preflight
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
@@ -455,6 +532,7 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::licensing::AccessDecision;
 
     #[test]
     fn tor_endpoint_injected_only_for_tor_mode() {
@@ -463,9 +541,15 @@ mod tests {
         inject_tor_addr(&mut tor, "socks5://127.0.0.1:19050");
         assert_eq!(tor["tor_addr"], "socks5://127.0.0.1:19050");
 
-        let direct =
-            EngineOptions::from([("proxy_mode".into(), serde_json::json!("direct"))]);
+        let direct = EngineOptions::from([("proxy_mode".into(), serde_json::json!("direct"))]);
         assert!(!needs_tor(&direct));
+    }
+
+    #[test]
+    fn denied_license_decision_stops_batch_before_side_effects() {
+        let decision = AccessDecision::denied("pngtosvg", 0, "trial engine ini sudah habis");
+        let error = ensure_batch_allowed(&decision).unwrap_err();
+        assert!(error.contains("trial engine ini sudah habis"));
     }
 
     #[tokio::test]
@@ -474,8 +558,12 @@ mod tests {
             EngineOptions::from([("proxy_mode".to_string(), serde_json::json!("free"))]);
         let fetcher = || {
             let cands = vec![
-                freeproxy::Candidate { url: "socks5://1.1.1.1:1080".into() },
-                freeproxy::Candidate { url: "http://2.2.2.2:8080".into() },
+                freeproxy::Candidate {
+                    url: "socks5://1.1.1.1:1080".into(),
+                },
+                freeproxy::Candidate {
+                    url: "http://2.2.2.2:8080".into(),
+                },
             ];
             Box::pin(std::future::ready(Ok(cands)))
                 as std::pin::Pin<Box<dyn Future<Output = Result<Vec<_>, String>>>>
@@ -495,7 +583,9 @@ mod tests {
             Box::pin(std::future::ready(Ok(Vec::new())))
                 as std::pin::Pin<Box<dyn Future<Output = Result<Vec<_>, String>>>>
         };
-        let err = translate_free_mode(&mut options, fetcher).await.unwrap_err();
+        let err = translate_free_mode(&mut options, fetcher)
+            .await
+            .unwrap_err();
         assert!(err.contains("tidak ada proxy gratis yang hidup"), "{err}");
     }
 
@@ -514,10 +604,8 @@ mod tests {
 
     #[test]
     fn tor_resource_preparation_error_emits_exact_error_status() {
-        let root = std::env::temp_dir().join(format!(
-            "xix-lib-tor-preparation-{}",
-            std::process::id()
-        ));
+        let root =
+            std::env::temp_dir().join(format!("xix-lib-tor-preparation-{}", std::process::id()));
         let runtime = root.join("resources/tor-runtime");
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(runtime.join("tor")).unwrap();
@@ -533,8 +621,7 @@ mod tests {
         );
         let mut statuses = Vec::new();
 
-        let error =
-            finish_tor_preparation(result, |status| statuses.push(status)).unwrap_err();
+        let error = finish_tor_preparation(result, |status| statuses.push(status)).unwrap_err();
 
         assert!(error.contains("geoip6"), "{error}");
         assert_eq!(
@@ -555,8 +642,7 @@ mod tests {
         );
         let mut statuses = Vec::new();
 
-        let error =
-            finish_tor_preparation(result, |status| statuses.push(status)).unwrap_err();
+        let error = finish_tor_preparation(result, |status| statuses.push(status)).unwrap_err();
 
         assert_eq!(error, "cannot resolve Tor data directory: denied");
         assert_eq!(

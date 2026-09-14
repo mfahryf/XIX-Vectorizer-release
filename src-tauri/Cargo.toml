@@ -28,6 +28,8 @@ futures-util = "0.3"
 parking_lot = "0.12"
 regex = "1"
 base64 = "0.22"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "webp"] }
 windows = { version = "0.58", features = ["Win32_Security_Cryptography", "Win32_Foundation"] }
 

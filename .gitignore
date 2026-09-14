@@ -1,3 +1,8 @@
 node_modules/
 src-tauri/target/
 src-tauri/gen/schemas/
+*.license
+*.lease
+device-identity*
+license-cache*
+usage-ledger*

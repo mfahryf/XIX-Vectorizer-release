@@ -42,6 +42,26 @@
       <div class="marquee" id="lcd-status">READY</div>
     </div>
 
+    <!-- ===== LICENSE ===== -->
+    <section id="license-panel" aria-label="Lisensi aplikasi">
+      <div class="license-head">
+        <span class="license-label">LICENSE</span>
+        <span id="license-badge">CHECKING</span>
+        <button id="license-refresh" type="button" title="Validasi lisensi">↻</button>
+      </div>
+      <div id="license-status">Memeriksa status lisensi…</div>
+      <div class="license-trials">
+        <span id="license-trial-v1">V1: —</span>
+        <span id="license-trial-v2">V2: —</span>
+        <span id="license-trial-v3">V3: —</span>
+      </div>
+      <div class="license-actions">
+        <input id="license-key" type="password" autocomplete="off" spellcheck="false" placeholder="License key bulanan">
+        <button id="license-activate" type="button">AKTIFKAN</button>
+      </div>
+      <div id="license-help">Trial: 5 file berhasil per engine. Satu lisensi untuk satu perangkat.</div>
+    </section>
+
     <!-- ===== ENGINE / FORMAT / FIT ===== -->
     <!-- engine → parameter (scale/fit) → format output (selalu paling kanan) -->
     <div class="cfg-row">
@@ -141,6 +161,7 @@
     </div>
   </div>
 
+  <script src="licensing-ui.js"></script>
   <script src="main.js"></script>
 </body>
 </html>

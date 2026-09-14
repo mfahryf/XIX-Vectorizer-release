@@ -3,11 +3,11 @@
 //! playlist live. Cancellation is cooperative: checked between files.
 
 use crate::engines::{is_http_403, Engine, EngineError, EngineOptions};
+use parking_lot::Mutex;
 use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
-use parking_lot::Mutex;
 
 const IMAGE_EXTS: &[&str] = &["jpg", "jpeg", "png", "webp"];
 
@@ -26,6 +26,7 @@ pub enum BatchEvent {
         name: String,
     },
     FileDone {
+        input: String,
         name: String,
         output: String,
     },
@@ -129,21 +130,27 @@ where
         .and_then(|v| v.as_f64())
         .unwrap_or(DEFAULT_BATCH_DELAY_SECS)
         .max(0.0);
-    let retry_403 = opts.get("retry_403").and_then(|v| v.as_bool()).unwrap_or(true);
-    let concurrency =
-        clamp_concurrency(opts.get("concurrency").and_then(|v| v.as_f64()));
+    let retry_403 = opts
+        .get("retry_403")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(true);
+    let concurrency = clamp_concurrency(opts.get("concurrency").and_then(|v| v.as_f64()));
 
     // Antrian file dengan indeks asli; claim = pop index terkecil yang belum
     // di-claim (urutan input terjaga). Mutex sinkron aman: guard tidak
     // pernah dipegang lintas await.
     let queue = Arc::new(Mutex::new(
-        files.into_iter().enumerate().map(|(i, f)| (f, i)).collect::<std::collections::VecDeque<(PathBuf, usize)>>(),
+        files
+            .into_iter()
+            .enumerate()
+            .map(|(i, f)| (f, i))
+            .collect::<std::collections::VecDeque<(PathBuf, usize)>>(),
     ));
     // Gate pacing global: satu START per `batch_delay` detik di seluruh pool.
     let next_start = Arc::new(AtomicU64::new(0));
     let stop = Arc::new(AtomicBool::new(false)); // worker selesai in-flight lalu berhenti
-    // Semua event + counter lewat satu channel ke aggregator agar emission
-    // terserialisasi dan urutan per-file tetap FileStart → progress → akhir.
+                                                 // Semua event + counter lewat satu channel ke aggregator agar emission
+                                                 // terserialisasi dan urutan per-file tetap FileStart → progress → akhir.
     enum WorkerMsg {
         Event(BatchEvent),
         Ok,
@@ -162,7 +169,12 @@ where
             let file = $file;
             let out_dir = $out_dir;
             let opts = $opts;
-            let name = file.0.file_name().and_then(|s| s.to_str()).unwrap_or("?").to_string();
+            let name = file
+                .0
+                .file_name()
+                .and_then(|s| s.to_str())
+                .unwrap_or("?")
+                .to_string();
             emit(BatchEvent::FileStart {
                 index: file.1,
                 total,
@@ -172,9 +184,11 @@ where
             // berbagi kode ini; `name` di-clone karena dipakai lagi di cabang fail.
             macro_rules! mark_done {
                 () => {{
+                    let output = out_dir.join(engine.output_name(&file.0, opts));
                     emit(BatchEvent::FileDone {
+                        input: file.0.to_string_lossy().replace('\\', "/"),
                         name: name.clone(),
-                        output: engine.output_name(&file.0, opts),
+                        output: output.to_string_lossy().replace('\\', "/"),
                     });
                 }};
             }
@@ -282,34 +296,46 @@ where
                             .map(|d| d.as_millis() as u64)
                             .unwrap_or(0);
                         let target_ms = next_start.load(Ordering::SeqCst);
-                        if now_ms >= target_ms && next_start.compare_exchange(
-                            target_ms, now_ms + (delay_secs * 1000.0) as u64,
-                            Ordering::SeqCst, Ordering::SeqCst,
-                        ).is_ok() {
+                        if now_ms >= target_ms
+                            && next_start
+                                .compare_exchange(
+                                    target_ms,
+                                    now_ms + (delay_secs * 1000.0) as u64,
+                                    Ordering::SeqCst,
+                                    Ordering::SeqCst,
+                                )
+                                .is_ok()
+                        {
                             break;
                         }
                         let wait_ms = target_ms.saturating_sub(now_ms);
                         tokio::time::sleep(std::time::Duration::from_millis(wait_ms.min(50))).await;
                     }
                 }
-                let file_name =
-                    file.0.file_name().and_then(|s| s.to_str()).unwrap_or("?").to_string();
+                let file_name = file
+                    .0
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("?")
+                    .to_string();
                 match process_file!(
                     engine,
-                    |ev| { let _ = tx.send(WorkerMsg::Event(ev)); },
+                    |ev| {
+                        let _ = tx.send(WorkerMsg::Event(ev));
+                    },
                     file,
                     &*worker_cancel,
                     out_dir,
                     opts
-                )
-                {
+                ) {
                     Ok(()) => {
                         let _ = tx.send(WorkerMsg::Ok);
                     }
                     Err(Some(msg)) => {
                         let is_rate_limit = msg.contains("rate limit");
                         let name = file_name;
-                        let _ = tx.send(WorkerMsg::Event(BatchEvent::FileFail { name, error: msg }));
+                        let _ =
+                            tx.send(WorkerMsg::Event(BatchEvent::FileFail { name, error: msg }));
                         if is_rate_limit {
                             stop.store(true, Ordering::SeqCst);
                             let _ = tx.send(WorkerMsg::RateLimited);
@@ -325,8 +351,8 @@ where
     // Drop sender utama — channel menutup hanya setelah semua worker
     // selesai (masing-masing punya clone tx sendiri).
     drop(tx);
-     let mut ok = 0u32;
-     let mut fail = 0u32;
+    let mut ok = 0u32;
+    let mut fail = 0u32;
     // Aggregator: event diterima LANGSUNG saat worker mengirim, tanpa
     // diblokir proses engine (worker di-spawn di task terpisah).
     // Channel menutup sendiri saat worker terakhir selesai + tx drop.
@@ -433,7 +459,6 @@ mod tests {
         .collect()
     }
 
-
     /// Factory sesuai kontrak run_batch: dipanggil sekali per worker dan
     /// menghasilkan instance engine baru untuk worker itu.
     fn factory_for<E>(make: impl Fn() -> E) -> impl Fn(usize) -> E
@@ -466,7 +491,10 @@ mod tests {
             move |e| ev.lock().unwrap().push(e),
         )
         .await;
-        assert_eq!(ok, 3, "engine processes every file passed in (filtering is scan's job)");
+        assert_eq!(
+            ok, 3,
+            "engine processes every file passed in (filtering is scan's job)"
+        );
         assert_eq!(fail, 0);
         assert_eq!(events.lock().unwrap().len(), 6); // 3 start + 3 done
     }
@@ -475,9 +503,15 @@ mod tests {
     /// dipakai untuk memastikan run_batch meneruskannya sebagai FileProgress.
     struct ProgressEngine;
     impl Engine for ProgressEngine {
-        fn id(&self) -> &str { "prog" }
-        fn name(&self) -> &str { "Prog" }
-        fn options_schema(&self) -> Vec<OptionDef> { vec![] }
+        fn id(&self) -> &str {
+            "prog"
+        }
+        fn name(&self) -> &str {
+            "Prog"
+        }
+        fn options_schema(&self) -> Vec<OptionDef> {
+            vec![]
+        }
         fn output_name(&self, file: &Path, _o: &EngineOptions) -> String {
             format!("{}.svg", file.file_stem().unwrap().to_string_lossy())
         }
@@ -507,9 +541,15 @@ mod tests {
     }
 
     impl Engine for QueuedProgressEngine {
-        fn id(&self) -> &str { "queued-prog" }
-        fn name(&self) -> &str { "Queued Prog" }
-        fn options_schema(&self) -> Vec<OptionDef> { vec![] }
+        fn id(&self) -> &str {
+            "queued-prog"
+        }
+        fn name(&self) -> &str {
+            "Queued Prog"
+        }
+        fn options_schema(&self) -> Vec<OptionDef> {
+            vec![]
+        }
         fn output_name(&self, file: &Path, _o: &EngineOptions) -> String {
             format!("{}.svg", file.file_stem().unwrap().to_string_lossy())
         }
@@ -626,7 +666,11 @@ mod tests {
                 _ => None,
             })
             .collect();
-        assert_eq!(pcts, vec![25, 50, 75, 100], "semua tick progress diteruskan berurutan");
+        assert_eq!(
+            pcts,
+            vec![25, 50, 75, 100],
+            "semua tick progress diteruskan berurutan"
+        );
         // dan tetap ada FileStart + FileDone di sekitarnya
         assert!(matches!(evs.first(), Some(BatchEvent::FileStart { .. })));
         assert!(matches!(evs.last(), Some(BatchEvent::FileDone { .. })));
@@ -745,7 +789,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
 
         let eng = factory_for(|| {
-            FakeEngine::fail_n_times(1, EngineError::Network("HTTP 403 Forbidden: blocked".into()))
+            FakeEngine::fail_n_times(
+                1,
+                EngineError::Network("HTTP 403 Forbidden: blocked".into()),
+            )
         });
         let (ok, fail) = run_batch(
             eng,
@@ -769,7 +816,10 @@ mod tests {
         std::fs::write(&file, b"x").unwrap();
 
         let eng = factory_for(|| {
-            FakeEngine::fail_n_times(99, EngineError::Network("HTTP 403 Forbidden: blocked".into()))
+            FakeEngine::fail_n_times(
+                99,
+                EngineError::Network("HTTP 403 Forbidden: blocked".into()),
+            )
         });
         let opts: EngineOptions = [("batch_delay".to_string(), serde_json::json!(0))]
             .into_iter()
@@ -790,7 +840,10 @@ mod tests {
         )
         .await;
         assert_eq!(ok, 0);
-        assert_eq!(fail, 1, "retry dimatikan → langsung fail, tidak menunggu backoff");
+        assert_eq!(
+            fail, 1,
+            "retry dimatikan → langsung fail, tidak menunggu backoff"
+        );
     }
 
     #[tokio::test]
@@ -802,7 +855,10 @@ mod tests {
         // Engine yang selalu 403: retry harus tepat satu kali (2 process
         // calls), lalu FileFail dengan suffix — bukan loop tanpa batas.
         let eng = factory_for(|| {
-            FakeEngine::fail_n_times(u32::MAX, EngineError::Network("HTTP 403 Forbidden: blocked".into()))
+            FakeEngine::fail_n_times(
+                u32::MAX,
+                EngineError::Network("HTTP 403 Forbidden: blocked".into()),
+            )
         });
         let mut events = Vec::new();
         let (ok, fail) = run_batch(
@@ -875,7 +931,6 @@ mod tests {
 
     // ---- Task 3: rolling worker pool ------------------------------------
 
-
     #[test]
     fn concurrency_clamped_to_valid_range() {
         assert_eq!(clamp_concurrency(None), 3);
@@ -909,25 +964,31 @@ mod tests {
     }
 
     impl GatedLogEngine {
-        fn with_gate(log: SharedLog, gate: Arc<(parking_lot::Mutex<u32>, tokio::sync::Notify)>) -> Self {
+        fn with_gate(
+            log: SharedLog,
+            gate: Arc<(parking_lot::Mutex<u32>, tokio::sync::Notify)>,
+        ) -> Self {
             GatedLogEngine { log, gate }
         }
     }
 
     /// Melepas n proses yang menunggu di gate bersama.
-    fn release_gate(
-        gate: &Arc<(parking_lot::Mutex<u32>, tokio::sync::Notify)>,
-        n: u32,
-    ) {
+    fn release_gate(gate: &Arc<(parking_lot::Mutex<u32>, tokio::sync::Notify)>, n: u32) {
         let (count, notify) = &**gate;
         *count.lock() += n;
         notify.notify_waiters();
     }
 
     impl Engine for GatedLogEngine {
-        fn id(&self) -> &str { "gated" }
-        fn name(&self) -> &str { "Gated" }
-        fn options_schema(&self) -> Vec<crate::engines::OptionDef> { vec![] }
+        fn id(&self) -> &str {
+            "gated"
+        }
+        fn name(&self) -> &str {
+            "Gated"
+        }
+        fn options_schema(&self) -> Vec<crate::engines::OptionDef> {
+            vec![]
+        }
         fn output_name(&self, file: &Path, _o: &EngineOptions) -> String {
             format!("{}.svg", file.file_stem().unwrap().to_string_lossy())
         }
@@ -938,7 +999,10 @@ mod tests {
             _opts: &'a EngineOptions,
             _progress: Option<&'a crate::net::http::ProgressSink>,
         ) -> crate::net::http::BoxFuture<'a, Result<Vec<u8>, EngineError>> {
-            let idx = file.file_stem().and_then(|s| s.to_str()).and_then(|s| s.parse::<usize>().ok());
+            let idx = file
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .and_then(|s| s.parse::<usize>().ok());
             let gate = self.gate.clone();
             Box::pin(async move {
                 if let Some(i) = idx {
@@ -994,14 +1058,26 @@ mod tests {
             )
             .await
         });
-        wait_for(|| log_of(&log, "process:").len() >= 3, "lebar pool = 3 in flight").await;
+        wait_for(
+            || log_of(&log, "process:").len() >= 3,
+            "lebar pool = 3 in flight",
+        )
+        .await;
         let mut claimed3 = log_of(&log, "process:");
         claimed3.sort_unstable();
-        assert_eq!(claimed3, vec![0, 1, 2], "tepat 3 file berbeda in flight (urutan bebas)");
+        assert_eq!(
+            claimed3,
+            vec![0, 1, 2],
+            "tepat 3 file berbeda in flight (urutan bebas)"
+        );
         // Lepas ketiganya: worker yang selesai langsung claim 3 dan 4 tanpa
         // menunggu seluruh batch-of-N selesai.
         release_gate(&gate, 3);
-        wait_for(|| log_of(&log, "process:").len() >= 5, "semua file ter-claim").await;
+        wait_for(
+            || log_of(&log, "process:").len() >= 5,
+            "semua file ter-claim",
+        )
+        .await;
         let mut claimed5 = log_of(&log, "process:");
         claimed5.sort_unstable();
         assert_eq!(
@@ -1021,9 +1097,15 @@ mod tests {
     }
 
     impl Engine for TimedEngine {
-        fn id(&self) -> &str { "timed" }
-        fn name(&self) -> &str { "Timed" }
-        fn options_schema(&self) -> Vec<crate::engines::OptionDef> { vec![] }
+        fn id(&self) -> &str {
+            "timed"
+        }
+        fn name(&self) -> &str {
+            "Timed"
+        }
+        fn options_schema(&self) -> Vec<crate::engines::OptionDef> {
+            vec![]
+        }
         fn output_name(&self, file: &Path, _o: &EngineOptions) -> String {
             format!("{}.svg", file.file_stem().unwrap().to_string_lossy())
         }
@@ -1040,7 +1122,9 @@ mod tests {
                 .and_then(|s| s.parse::<usize>().ok())
                 .unwrap_or(usize::MAX);
             Box::pin(async move {
-                self.times.lock().push((format!("{idx}"), std::time::Instant::now()));
+                self.times
+                    .lock()
+                    .push((format!("{idx}"), std::time::Instant::now()));
                 Ok(b"ok".to_vec())
             })
         }
@@ -1064,7 +1148,9 @@ mod tests {
         .collect();
         let times2 = times.clone();
         run_batch(
-            move |_| TimedEngine { times: times2.clone() },
+            move |_| TimedEngine {
+                times: times2.clone(),
+            },
             files,
             &dir,
             &opts,
@@ -1092,14 +1178,23 @@ mod tests {
 
     impl RateLimitAtEngine {
         fn new(log: SharedLog, at: u64) -> Self {
-            RateLimitAtEngine { log, limit_at: std::sync::atomic::AtomicU64::new(at) }
+            RateLimitAtEngine {
+                log,
+                limit_at: std::sync::atomic::AtomicU64::new(at),
+            }
         }
     }
 
     impl Engine for RateLimitAtEngine {
-        fn id(&self) -> &str { "ratelimit" }
-        fn name(&self) -> &str { "RateLimit" }
-        fn options_schema(&self) -> Vec<crate::engines::OptionDef> { vec![] }
+        fn id(&self) -> &str {
+            "ratelimit"
+        }
+        fn name(&self) -> &str {
+            "RateLimit"
+        }
+        fn options_schema(&self) -> Vec<crate::engines::OptionDef> {
+            vec![]
+        }
         fn output_name(&self, file: &Path, _o: &EngineOptions) -> String {
             format!("{}.svg", file.file_stem().unwrap().to_string_lossy())
         }
@@ -1157,12 +1252,19 @@ mod tests {
             |e| events.push(e),
         )
         .await;
-        assert_eq!(log_of(&log, "process:"), vec![0], "tidak ada file lain di-claim");
+        assert_eq!(
+            log_of(&log, "process:"),
+            vec![0],
+            "tidak ada file lain di-claim"
+        );
         assert_eq!((ok, fail), (0, 1));
         assert!(
             matches!(
                 &events[..],
-                [BatchEvent::FileStart { index: 0, .. }, BatchEvent::FileFail { .. }]
+                [
+                    BatchEvent::FileStart { index: 0, .. },
+                    BatchEvent::FileFail { .. }
+                ]
             ),
             "event stream: hanya file 0 start lalu fail"
         );
@@ -1171,8 +1273,18 @@ mod tests {
     #[test]
     fn common_options_expose_concurrency_number() {
         let defs = crate::engines::common_batch_options();
-        let c = defs.iter().find(|d| d.id == "concurrency").expect("concurrency option");
-        assert!(matches!(c.kind, crate::engines::OptionKind::Number { min: 1.0, max: 8.0, step: 1.0 }));
+        let c = defs
+            .iter()
+            .find(|d| d.id == "concurrency")
+            .expect("concurrency option");
+        assert!(matches!(
+            c.kind,
+            crate::engines::OptionKind::Number {
+                min: 1.0,
+                max: 8.0,
+                step: 1.0
+            }
+        ));
         assert_eq!(c.default, serde_json::json!(3));
     }
 
