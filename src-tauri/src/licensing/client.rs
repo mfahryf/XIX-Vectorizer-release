@@ -11,6 +11,13 @@ use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 pub const DEFAULT_GATEWAY_URL: &str = "https://payment.xixlabs.net";
+/// Public verification key for the current gateway signing key.
+///
+/// This is intentionally public material: it verifies signed leases and trial
+/// tokens but cannot issue them. `XIX_GATEWAY_PUBLIC_KEY_B64` remains available
+/// as a build-time override for a planned key rotation.
+pub const PINNED_GATEWAY_PUBLIC_KEY_B64: &str =
+    "zvIgnq2_0OK8YdmMS64_9zeguRLJm4pz0C30bGYjUOo";
 
 #[derive(Clone)]
 pub struct LicenseClient {
@@ -58,9 +65,12 @@ impl LicenseClient {
     }
 
     pub fn production() -> Result<Self, LicenseError> {
+        let gateway_public_key = option_env!("XIX_GATEWAY_PUBLIC_KEY_B64")
+            .filter(|value| !value.trim().is_empty())
+            .or(Some(PINNED_GATEWAY_PUBLIC_KEY_B64));
         Self::new(
             DEFAULT_GATEWAY_URL,
-            option_env!("XIX_GATEWAY_PUBLIC_KEY_B64"),
+            gateway_public_key,
         )
     }
 
@@ -496,4 +506,15 @@ where
 {
     let value = Option::<Value>::deserialize(deserializer)?;
     Ok(value.and_then(|value| value.as_i64()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LicenseClient;
+
+    #[test]
+    fn production_client_has_a_pinned_gateway_public_key() {
+        let client = LicenseClient::production().expect("production client should be valid");
+        assert!(client.gateway_public_key.is_some());
+    }
 }
