@@ -44,8 +44,10 @@ function renderLicenseStatus(status) {
   const offline = view.offlineDaysRemaining == null ? "" : ` · offline ${view.offlineDaysRemaining} hari`;
   $("license-help").textContent = view.canProcess
     ? `${view.message}${offline}`
-    : "Pemrosesan terkunci; file lama, pengaturan, dan bantuan tetap tersedia.";
-  if (!state.running) setEnabled($("btn-start"), view.canProcess);
+    : view.recoveryRequestCode || state.license?.license_state === "unactivated"
+      ? view.message
+      : "Pemrosesan terkunci; file lama, pengaturan, dan bantuan tetap tersedia.";
+  if (!state.running) setEnabled($("btn-start"), view.canStart);
 }
 async function loadLicenseStatus() {
   try {
@@ -283,7 +285,7 @@ function setRunState(phase) {
   const body = document.body;
   body.classList.toggle("running", phase === "running" || phase === "paused");
   body.classList.toggle("paused", phase === "paused");
-  setEnabled($("btn-start"), phase === "idle" && (!state.licenseView || state.licenseView.canProcess));
+  setEnabled($("btn-start"), phase === "idle" && (!state.licenseView || state.licenseView.canStart));
   setEnabled($("btn-pause"), phase === "running" || phase === "paused");
   setEnabled($("btn-stop"), phase === "running" || phase === "paused");
   $("btn-pause").title =

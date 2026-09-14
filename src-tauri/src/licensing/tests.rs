@@ -3,6 +3,11 @@ use crate::licensing::{
     AccessDecision, LeasePayload, LicenseManager, LicenseState, LicenseStore, LocalLicenseState,
     TrialState, UsageLedger, UsageRecord,
 };
+use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::Engine;
+use ed25519_dalek::{Signer, SigningKey};
+use rand_core::OsRng;
+use serde_json::json;
 
 #[test]
 fn trial_uses_real_engine_ids_and_locks_only_exhausted_engine() {
@@ -84,8 +89,8 @@ fn status_does_not_expose_private_material() {
 #[test]
 fn device_identity_roundtrips_through_protected_storage() {
     let dir = tempfile_dir("identity");
-    let first = DeviceIdentityStore::load_or_create(&dir).expect("create identity");
-    let second = DeviceIdentityStore::load_or_create(&dir).expect("load identity");
+    let first = DeviceIdentityStore::create(&dir).expect("create identity");
+    let second = DeviceIdentityStore::load(&dir).expect("load identity");
     assert_eq!(first.fingerprint(), second.fingerprint());
     assert_eq!(first.public_key_base64(), second.public_key_base64());
     assert_ne!(
@@ -181,10 +186,137 @@ async fn fresh_manager_reports_trial_without_network_call() {
     let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
     let manager = LicenseManager::with_client(&dir, client).unwrap();
     let status = manager.status().await.unwrap();
-    assert_eq!(status.license_state, LicenseState::Trial);
+    assert_eq!(status.license_state, LicenseState::Unactivated);
     assert_eq!(status.trial_remaining_by_engine["vectorize-v1"], 5);
     assert_eq!(status.trial_remaining_by_engine["vectorize-v2"], 5);
     assert_eq!(status.trial_remaining_by_engine["pngtosvg"], 5);
+    assert!(!DeviceIdentityStore::path(&dir).exists());
+}
+
+#[test]
+fn signed_trial_token_verification_rejects_counter_or_device_tampering() {
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let mut payload = json!({
+        "product_id": "xix-vectorizer",
+        "device_id": "device-1",
+        "claimed_at": "2026-09-14T00:00:00+00:00",
+        "trial_remaining_by_engine": {"pngtosvg": 5},
+        "key_id": "xix-license-test"
+    });
+    let signature = signing_key.sign(&crate::licensing::canonical_trial_token_bytes(&payload));
+    let signature = BASE64.encode(signature.to_bytes());
+
+    assert!(crate::licensing::verify_trial_token_signature(
+        &payload,
+        &signature,
+        &signing_key.verifying_key()
+    ));
+    payload["trial_remaining_by_engine"]["pngtosvg"] = json!(6);
+    assert!(!crate::licensing::verify_trial_token_signature(
+        &payload,
+        &signature,
+        &signing_key.verifying_key()
+    ));
+}
+
+#[tokio::test]
+async fn local_trial_state_rejects_a_tampered_signed_token() {
+    let dir = tempfile_dir("trial-token-state");
+    let identity = DeviceIdentityStore::create(&dir).unwrap();
+    let signing_key = SigningKey::generate(&mut OsRng);
+    let payload = json!({
+        "product_id": "xix-vectorizer",
+        "device_id": identity.registration_id(),
+        "claimed_at": "2026-09-14T00:00:00+00:00",
+        "trial_remaining_by_engine": {
+            "vectorize-v1": 5,
+            "vectorize-v2": 5,
+            "pngtosvg": 5
+        },
+        "key_id": "xix-license-test"
+    });
+    let signature = signing_key.sign(&crate::licensing::canonical_trial_token_bytes(&payload));
+    let token = crate::licensing::TrialToken {
+        payload: json!({
+            "product_id": "xix-vectorizer",
+            "device_id": identity.registration_id(),
+            "claimed_at": "2026-09-14T00:00:00+00:00",
+            "trial_remaining_by_engine": {
+                "vectorize-v1": 6,
+                "vectorize-v2": 5,
+                "pngtosvg": 5
+            },
+            "key_id": "xix-license-test"
+        }),
+        key_id: "xix-license-test".into(),
+        signature: BASE64.encode(signature.to_bytes()),
+    };
+    let mut state = LocalLicenseState::default();
+    state.trial.claimed_at = Some(1_789_000_000);
+    state.trial_token = Some(token);
+    LicenseStore::new(&dir).save(&state).unwrap();
+    let public_key = BASE64.encode(signing_key.verifying_key().to_bytes());
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", Some(&public_key)).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+
+    let error = manager.status().await.unwrap_err();
+
+    assert!(matches!(error, crate::licensing::LicenseError::InvalidTrialToken(_)));
+}
+
+#[tokio::test]
+async fn missing_identity_with_cached_state_reports_recovery_without_recreating_device() {
+    let dir = tempfile_dir("identity-lost");
+    let store = LicenseStore::new(&dir);
+    let mut local = LocalLicenseState::default();
+    local.trial.claimed_at = Some(1_700_000_000);
+    store.save(&local).unwrap();
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+
+    let status = manager.status().await.unwrap();
+
+    assert_eq!(status.license_state, LicenseState::DeviceIdentityLost);
+    assert_eq!(status.device_state, "identity-lost");
+    assert!(status.recovery_request_code.is_some());
+    assert!(status.recovery_contact.is_some());
+    assert!(!DeviceIdentityStore::path(&dir).exists());
+}
+
+#[tokio::test]
+async fn activation_does_not_replace_a_lost_identity() {
+    let dir = tempfile_dir("activation-identity-lost");
+    let store = LicenseStore::new(&dir);
+    let mut local = LocalLicenseState::default();
+    local.trial.claimed_at = Some(1_700_000_000);
+    store.save(&local).unwrap();
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+
+    let error = manager.activate("XIX-test-key".into()).await.unwrap_err();
+
+    assert_eq!(error, crate::licensing::LicenseError::DeviceIdentityLost);
+    assert!(!DeviceIdentityStore::path(&dir).exists());
+}
+
+#[tokio::test]
+async fn first_processing_preflight_claims_online_before_allowing_trial() {
+    let dir = tempfile_dir("first-processing");
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+
+    let error = manager.preflight("pngtosvg", 1).await.unwrap_err();
+
+    assert!(matches!(error, crate::licensing::LicenseError::Network(_)));
+    assert!(DeviceIdentityStore::path(&dir).exists());
+    assert!(!LicenseStore::new(&dir).path().exists());
+}
+
+#[test]
+fn local_clock_before_last_trusted_server_time_is_rejected() {
+    assert!(!crate::licensing::clock_is_trusted(2_000, 1_999));
+    assert!(crate::licensing::clock_is_trusted(2_000, 2_000));
+    assert!(crate::licensing::clock_is_trusted(2_000, 2_001));
 }
 
 #[test]

@@ -1,5 +1,6 @@
 use super::usage::UsageLedger;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
 
 pub const PRODUCT_ID: &str = "xix-vectorizer";
@@ -17,7 +18,9 @@ pub enum LicenseState {
     Revoked,
     DeviceConflict,
     DeviceIdentityLost,
+    ClockRollback,
     Unavailable,
+    Unactivated,
 }
 
 impl LicenseState {
@@ -46,6 +49,13 @@ impl Default for EngineTrial {
 pub struct TrialState {
     pub engines: BTreeMap<String, EngineTrial>,
     pub claimed_at: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TrialToken {
+    pub payload: Value,
+    pub key_id: String,
+    pub signature: String,
 }
 
 impl TrialState {
@@ -125,6 +135,24 @@ impl TrialState {
             .keys()
             .map(|engine_id| (engine_id.clone(), self.remaining(engine_id)))
             .collect()
+    }
+
+    pub fn matches_token(&self, token: &TrialToken) -> bool {
+        let Some(counters) = token
+            .payload
+            .get("trial_remaining_by_engine")
+            .and_then(Value::as_object)
+        else {
+            return false;
+        };
+        self.engines.iter().all(|(engine_id, engine)| {
+            counters
+                .get(engine_id)
+                .and_then(Value::as_u64)
+                .is_some_and(|remaining| {
+                    u64::from(TRIAL_FILE_LIMIT.saturating_sub(engine.successful_files)) <= remaining
+                })
+        })
     }
 }
 
@@ -220,9 +248,18 @@ pub struct LicenseStatus {
     pub signature: Option<String>,
     pub license_key_fingerprint: Option<String>,
     pub offline_days_remaining: Option<u16>,
+    pub recovery_request_code: Option<String>,
+    pub recovery_contact: Option<String>,
 }
 
 impl LicenseStatus {
+    pub fn unactivated_default() -> Self {
+        let mut status = Self::trial_default();
+        status.license_state = LicenseState::Unactivated;
+        status.device_state = "unregistered".into();
+        status
+    }
+
     pub fn trial_default() -> Self {
         let trial = TrialState::new(ENGINE_IDS);
         Self {
@@ -237,6 +274,8 @@ impl LicenseStatus {
             signature: None,
             license_key_fingerprint: None,
             offline_days_remaining: None,
+            recovery_request_code: None,
+            recovery_contact: None,
         }
     }
 }
@@ -244,6 +283,8 @@ impl LicenseStatus {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LocalLicenseState {
     pub trial: TrialState,
+    #[serde(default)]
+    pub trial_token: Option<TrialToken>,
     pub lease: Option<LeasePayload>,
     pub lease_verified: bool,
     pub last_server_time: Option<i64>,
@@ -255,6 +296,7 @@ impl Default for LocalLicenseState {
     fn default() -> Self {
         Self {
             trial: TrialState::new(ENGINE_IDS),
+            trial_token: None,
             lease: None,
             lease_verified: false,
             last_server_time: None,

@@ -12,6 +12,8 @@ pub enum LicenseError {
     SubscriptionExpired,
     Revoked,
     InvalidLease(String),
+    InvalidTrialToken(String),
+    ClockRollback,
     InvalidLicenseKey,
     Configuration(String),
 }
@@ -29,6 +31,8 @@ impl fmt::Display for LicenseError {
             Self::SubscriptionExpired => f.write_str("langganan lisensi sudah berakhir"),
             Self::Revoked => f.write_str("lisensi telah dicabut"),
             Self::InvalidLease(message) => write!(f, "lease lisensi tidak valid: {message}"),
+            Self::InvalidTrialToken(message) => write!(f, "token trial tidak valid: {message}"),
+            Self::ClockRollback => f.write_str("jam perangkat mundur dari waktu server tepercaya"),
             Self::InvalidLicenseKey => f.write_str("masukkan license key yang valid"),
             Self::Configuration(message) => write!(f, "konfigurasi lisensi tidak valid: {message}"),
         }

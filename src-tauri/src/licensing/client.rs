@@ -1,6 +1,6 @@
 use crate::licensing::device::{DeviceIdentity, SignedRequest};
 use crate::licensing::error::LicenseError;
-use crate::licensing::models::{LeasePayload, PRODUCT_ID};
+use crate::licensing::models::{LeasePayload, TrialToken, PRODUCT_ID, TRIAL_FILE_LIMIT};
 use crate::licensing::usage::UsageRecord;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
@@ -23,8 +23,11 @@ pub struct LicenseClient {
 pub struct TrialClaimResponse {
     #[serde(default)]
     pub trial_remaining_by_engine: BTreeMap<String, u8>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub claimed_at: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub server_time: Option<i64>,
+    pub trial_token: Option<TrialToken>,
 }
 
 impl LicenseClient {
@@ -60,6 +63,63 @@ impl LicenseClient {
         format!("{}{}", self.base_url, path)
     }
 
+    pub fn validate_trial_token(
+        &self,
+        token: &TrialToken,
+        identity: &DeviceIdentity,
+    ) -> Result<(), LicenseError> {
+        let key = self.gateway_public_key.as_ref().ok_or_else(|| {
+            LicenseError::InvalidTrialToken(
+                "verification key gateway belum dipasang pada build ini".into(),
+            )
+        })?;
+        if token.key_id.trim().is_empty()
+            || token
+                .payload
+                .get("key_id")
+                .and_then(Value::as_str)
+                .is_some_and(|key_id| key_id != token.key_id)
+            || !verify_trial_token_signature(&token.payload, &token.signature, key)
+        {
+            return Err(LicenseError::InvalidTrialToken(
+                "signature token trial tidak cocok".into(),
+            ));
+        }
+        if token.payload.get("product_id").and_then(Value::as_str) != Some(PRODUCT_ID)
+            || !token
+                .payload
+                .get("device_id")
+                .and_then(Value::as_str)
+                .is_some_and(|id| id == identity.registration_id() || id == identity.fingerprint())
+            || !valid_trial_counters(&token.payload)
+        {
+            return Err(LicenseError::InvalidTrialToken(
+                "isi token trial tidak sesuai aplikasi atau perangkat".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate_cached_lease(
+        &self,
+        lease: &LeasePayload,
+        identity: &DeviceIdentity,
+    ) -> Result<(), LicenseError> {
+        let key = self.gateway_public_key.as_ref().ok_or_else(|| {
+            LicenseError::InvalidLease(
+                "verification key gateway belum dipasang pada build ini".into(),
+            )
+        })?;
+        if !verify_lease_signature(lease, key)
+            || !lease.is_valid_for(PRODUCT_ID, &identity.fingerprint(), lease.server_time)
+        {
+            return Err(LicenseError::InvalidLease(
+                "signature atau binding lease lokal tidak cocok".into(),
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn claim_trial(
         &self,
         identity: &DeviceIdentity,
@@ -78,8 +138,23 @@ impl LicenseClient {
             .get("trial")
             .or_else(|| value.get("data").and_then(|data| data.get("trial")))
             .unwrap_or(&value);
-        serde_json::from_value(source.clone())
-            .map_err(|error| LicenseError::Network(error.to_string()))
+        let mut response: TrialClaimResponse = serde_json::from_value(source.clone())
+            .map_err(|error| LicenseError::InvalidTrialToken(error.to_string()))
+            ?;
+        let token = response.trial_token.as_ref().ok_or_else(|| {
+            LicenseError::InvalidTrialToken("server tidak mengembalikan token trial".into())
+        })?;
+        self.validate_trial_token(token, identity)?;
+        if response.claimed_at.is_none() {
+            response.claimed_at = token
+                .payload
+                .get("claimed_at")
+                .and_then(parse_timestamp_value);
+        }
+        if response.server_time.is_none() {
+            response.server_time = source.get("server_time").and_then(parse_timestamp_value);
+        }
+        Ok(response)
     }
 
     pub async fn activate(
@@ -120,7 +195,13 @@ impl LicenseClient {
             .http
             .get(self.endpoint("/v1/desktop/license/status"))
             .headers(request_headers(&signed))
-            .query(&[("product_id", PRODUCT_ID), ("app_version", app_version)])
+            .query(&[
+                ("product_id", PRODUCT_ID),
+                ("app_version", app_version),
+                ("device_id", identity.registration_id()),
+                ("public_key", &identity.public_key_base64()),
+                ("public_key_fingerprint", &identity.fingerprint()),
+            ])
             .send()
             .await
             .map_err(|error| LicenseError::Network(error.to_string()))?;
@@ -186,6 +267,7 @@ impl LicenseClient {
         let body = json!({
             "product_id": PRODUCT_ID,
             "app_version": app_version,
+            "device_id": identity.registration_id(),
             "action": action,
             "payload": payload,
             "public_key": signed.public_key,
@@ -314,4 +396,98 @@ pub fn verify_lease_signature(lease: &LeasePayload, key: &VerifyingKey) -> bool 
     };
     key.verify(&canonical_lease_bytes(lease), &signature)
         .is_ok()
+}
+
+pub fn canonical_trial_token_bytes(payload: &Value) -> Vec<u8> {
+    serde_json::to_vec(payload).unwrap_or_default()
+}
+
+pub fn verify_trial_token_signature(
+    payload: &Value,
+    signature: &str,
+    key: &VerifyingKey,
+) -> bool {
+    let decoded = BASE64
+        .decode(signature.trim())
+        .or_else(|_| {
+            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(signature.trim())
+        });
+    let Ok(bytes) = decoded else {
+        return false;
+    };
+    let Ok(signature) = Signature::from_slice(&bytes) else {
+        return false;
+    };
+    key.verify(&canonical_trial_token_bytes(payload), &signature)
+        .is_ok()
+}
+
+fn valid_trial_counters(payload: &Value) -> bool {
+    let Some(counters) = payload
+        .get("trial_remaining_by_engine")
+        .and_then(Value::as_object)
+    else {
+        return false;
+    };
+    !counters.is_empty() && counters.iter().all(|(engine_id, remaining)| {
+        crate::licensing::models::ENGINE_IDS.contains(&engine_id.as_str())
+            && remaining
+                .as_u64()
+                .is_some_and(|value| value <= u64::from(TRIAL_FILE_LIMIT))
+    })
+}
+
+fn deserialize_optional_timestamp<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.as_ref().and_then(parse_timestamp_value))
+}
+
+fn parse_timestamp_value(value: &Value) -> Option<i64> {
+    value.as_i64().or_else(|| value.as_str().and_then(parse_rfc3339))
+}
+
+fn parse_rfc3339(value: &str) -> Option<i64> {
+    let (date, time_and_zone) = value.split_once('T').or_else(|| value.split_once(' '))?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let (time, zone) = if let Some((time, zone)) = time_and_zone.split_once('Z') {
+        (time, format!("Z{zone}"))
+    } else if let Some(index) = time_and_zone.rfind(['+', '-']) {
+        (&time_and_zone[..index], time_and_zone[index..].to_string())
+    } else {
+        (time_and_zone, "Z".into())
+    };
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts
+        .next()?
+        .split('.')
+        .next()?
+        .parse()
+        .ok()?;
+    let offset_seconds = if zone == "Z" {
+        0
+    } else {
+        let sign = if zone.starts_with('-') { -1 } else { 1 };
+        let offset = zone.get(1..)?.split_once(':')?;
+        sign * (offset.0.parse::<i64>().ok()? * 3_600 + offset.1.parse::<i64>().ok()? * 60)
+    };
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year / 400
+    } else {
+        (adjusted_year - 399) / 400
+    };
+    let year_of_era = adjusted_year - era * 400;
+    let month_index = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second - offset_seconds)
 }

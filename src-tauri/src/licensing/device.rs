@@ -113,12 +113,20 @@ impl DeviceIdentityStore {
         dir.join("device-identity.dat")
     }
 
-    pub fn load_or_create(dir: &Path) -> Result<DeviceIdentity, LicenseError> {
+    pub fn load(dir: &Path) -> Result<DeviceIdentity, LicenseError> {
         let path = Self::path(dir);
         if let Some(blob) = read_protected::<DeviceIdentityBlob>(&path)
             .map_err(|_| LicenseError::DeviceIdentityLost)?
         {
             return DeviceIdentity::from_blob(blob);
+        }
+        Err(LicenseError::DeviceIdentityLost)
+    }
+
+    pub fn create(dir: &Path) -> Result<DeviceIdentity, LicenseError> {
+        let path = Self::path(dir);
+        if path.exists() {
+            return Self::load(dir);
         }
         let identity = DeviceIdentity::generate()?;
         write_protected(&path, &identity.blob())?;

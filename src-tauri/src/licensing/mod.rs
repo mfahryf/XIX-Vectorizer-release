@@ -6,13 +6,15 @@ pub mod storage;
 pub mod usage;
 
 pub use client::{
-    canonical_lease_bytes, verify_lease_signature, LicenseClient, TrialClaimResponse,
+    canonical_lease_bytes, canonical_trial_token_bytes, verify_lease_signature,
+    verify_trial_token_signature, LicenseClient, TrialClaimResponse,
 };
 pub use usage::{UsageLedger, UsageRecord};
 
 pub use device::{DeviceIdentity, DeviceIdentityStore};
 pub use models::{
     AccessDecision, LeasePayload, LicenseState, LicenseStatus, LocalLicenseState, TrialState,
+    TrialToken,
 };
 pub use storage::LicenseStore;
 
@@ -48,36 +50,135 @@ impl LicenseManager {
         })
     }
 
-    fn identity(&self) -> Result<DeviceIdentity, LicenseError> {
+    fn load_identity(&self) -> Result<DeviceIdentity, LicenseError> {
         if let Some(identity) = self.identity.lock().as_ref() {
             return Ok(identity.clone());
         }
-        let identity = DeviceIdentityStore::load_or_create(&self.dir)?;
+        let identity = DeviceIdentityStore::load(&self.dir)?;
         *self.identity.lock() = Some(identity.clone());
         Ok(identity)
     }
 
+    fn ensure_identity(&self) -> Result<DeviceIdentity, LicenseError> {
+        match self.load_identity() {
+            Ok(identity) => Ok(identity),
+            Err(LicenseError::DeviceIdentityLost) => {
+                if self.has_cached_state(&self.state.lock().clone()) {
+                    return Err(LicenseError::DeviceIdentityLost);
+                }
+                let identity = DeviceIdentityStore::create(&self.dir)?;
+                *self.identity.lock() = Some(identity.clone());
+                Ok(identity)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn has_cached_state(&self, local: &LocalLicenseState) -> bool {
+        self.store.path().exists()
+            || local.trial.claimed_at.is_some()
+            || local.trial_token.is_some()
+            || local.lease.is_some()
+            || !local.usage.records.is_empty()
+    }
+
     pub async fn status(&self) -> Result<Status, LicenseError> {
-        let identity = match self.identity() {
+        let local = self.state.lock().clone();
+        let identity = match self.load_identity() {
             Ok(identity) => identity,
             Err(LicenseError::DeviceIdentityLost) => {
+                if !self.has_cached_state(&local) {
+                    return Ok(Status::unactivated_default());
+                }
                 let mut status = Status::trial_default();
                 status.license_state = LicenseState::DeviceIdentityLost;
                 status.device_state = "identity-lost".into();
                 status.reason = Some("buat pemulihan perangkat melalui admin".into());
+                let source = local
+                    .lease
+                    .as_ref()
+                    .map(|lease| lease.device_fingerprint.as_str())
+                    .or_else(|| {
+                        local
+                            .trial_token
+                            .as_ref()
+                            .and_then(|token| token.payload.get("device_id"))
+                            .and_then(serde_json::Value::as_str)
+                    })
+                    .unwrap_or("identity-lost");
+                status.recovery_request_code = Some(recovery_request_code(
+                    source,
+                    local.last_server_time,
+                ));
+                status.recovery_contact = Some("hubungi admin lisensi XIXLabs".into());
                 return Ok(status);
             }
             Err(error) => return Err(error),
         };
+        let now = unix_now();
+        if let Some(last_server_time) = local.last_server_time {
+            if !clock_is_trusted(last_server_time, now) {
+                let mut status = Status::trial_default();
+                status.license_state = LicenseState::ClockRollback;
+                status.device_state = "clock-rollback".into();
+                status.reason = Some("periksa waktu perangkat untuk melanjutkan".into());
+                return Ok(status);
+            }
+        }
+        if let Some(token) = local.trial_token.as_ref() {
+            self.client.validate_trial_token(token, &identity)?;
+            if !local.trial.matches_token(token) {
+                return Err(LicenseError::InvalidTrialToken(
+                    "counter lokal melebihi token trial yang ditandatangani".into(),
+                ));
+            }
+        }
+        if let Some(lease) = local.lease.as_ref() {
+            self.client.validate_cached_lease(lease, &identity)?;
+        }
+        if DeviceIdentityStore::path(&self.dir).exists() || self.has_cached_state(&local) {
+            if let Ok(status) = self.refresh_from_server(&identity).await {
+                return Ok(status);
+            }
+        }
+        if local.trial.claimed_at.is_some() && local.trial_token.is_none() {
+            return Err(LicenseError::InvalidTrialToken(
+                "cache trial lama tidak memiliki token bertanda tangan".into(),
+            ));
+        }
+        self.status_inner(false).await
+    }
+
+    async fn refresh_from_server(&self, identity: &DeviceIdentity) -> Result<Status, LicenseError> {
+        let local = self.state.lock().clone();
+        let lease = if local.lease.is_some() {
+            Some(
+                self.client
+                    .renew(identity, env!("CARGO_PKG_VERSION"))
+                    .await?,
+            )
+        } else {
+            self.client
+                .status(identity, env!("CARGO_PKG_VERSION"))
+                .await?
+        };
+        let Some(lease) = lease else {
+            return Err(LicenseError::Network("lisensi belum aktif".into()));
+        };
+        self.store_lease(lease)?;
+        self.local_status_without_refresh().await
+    }
+
+    async fn local_status_without_refresh(&self) -> Result<Status, LicenseError> {
+        self.status_inner(false).await
+    }
+
+    async fn status_inner(&self, _allow_refresh: bool) -> Result<Status, LicenseError> {
+        let identity = self.load_identity()?;
         let local = self.state.lock().clone();
         let now = unix_now();
         let mut status = Status::trial_default();
-        status.device_state = if local.lease.is_some() {
-            "bound"
-        } else {
-            "registered"
-        }
-        .into();
+        status.device_state = if local.lease.is_some() { "bound" } else { "registered" }.into();
         status.trial_remaining_by_engine = local.trial.remaining_by_engine();
         status.license_key_fingerprint = local.license_key_fingerprint;
         if let Some(lease) = local.lease {
@@ -86,13 +187,12 @@ impl LicenseManager {
             status.server_time = Some(lease.server_time);
             status.key_id = Some(lease.key_id.clone());
             status.signature = Some(lease.signature.clone());
-            if local.lease_verified && lease.is_valid_for(PRODUCT_ID, &identity.fingerprint(), now)
-            {
-                let recently_online = local
+            if local.lease_verified && lease.is_valid_for(PRODUCT_ID, &identity.fingerprint(), now) {
+                status.license_state = if local
                     .last_server_time
                     .map(|time| now.saturating_sub(time) <= 300)
-                    .unwrap_or(false);
-                status.license_state = if recently_online {
+                    .unwrap_or(false)
+                {
                     LicenseState::Licensed
                 } else {
                     LicenseState::LicensedOffline
@@ -109,12 +209,16 @@ impl LicenseManager {
                 status.license_state = LicenseState::ExpiredOffline;
                 status.reason = Some("hubungkan internet untuk memvalidasi lisensi".into());
             }
+        } else if local.trial.claimed_at.is_some() {
+            status.license_state = LicenseState::Trial;
+        } else {
+            status.license_state = LicenseState::Unactivated;
         }
         Ok(status)
     }
 
     pub async fn activate(&self, license_key: String) -> Result<Status, LicenseError> {
-        let identity = self.identity()?;
+        let identity = self.ensure_identity()?;
         let lease = self
             .client
             .activate(&identity, env!("CARGO_PKG_VERSION"), &license_key)
@@ -122,6 +226,7 @@ impl LicenseManager {
         {
             let mut state = self.state.lock();
             state.lease_verified = true;
+            self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
             state.last_server_time = Some(lease.server_time);
             state.license_key_fingerprint = Some(fingerprint_secret(&license_key));
             state.lease = Some(lease);
@@ -131,29 +236,8 @@ impl LicenseManager {
     }
 
     pub async fn refresh(&self) -> Result<Status, LicenseError> {
-        let identity = self.identity()?;
-        let lease = if self.state.lock().lease.is_some() {
-            self.client
-                .renew(&identity, env!("CARGO_PKG_VERSION"))
-                .await?
-        } else {
-            match self
-                .client
-                .status(&identity, env!("CARGO_PKG_VERSION"))
-                .await?
-            {
-                Some(lease) => lease,
-                None => return self.status().await,
-            }
-        };
-        {
-            let mut state = self.state.lock();
-            state.lease_verified = true;
-            state.last_server_time = Some(lease.server_time);
-            state.lease = Some(lease);
-            self.store.save(&state)?;
-        }
-        self.status().await
+        let identity = self.load_identity()?;
+        self.refresh_from_server(&identity).await
     }
 
     pub async fn preflight(
@@ -172,7 +256,7 @@ impl LicenseManager {
                     status.license_state,
                 ));
             }
-            LicenseState::Trial => {}
+            LicenseState::Trial | LicenseState::Unactivated => {}
             state => {
                 return Ok(AccessDecision::denied_with_state(
                     engine_id,
@@ -184,13 +268,18 @@ impl LicenseManager {
             }
         }
         if self.state.lock().trial.claimed_at.is_none() {
-            let identity = self.identity()?;
+            let identity = self.ensure_identity()?;
             let claim = self
                 .client
                 .claim_trial(&identity, env!("CARGO_PKG_VERSION"))
                 .await?;
             let mut state = self.state.lock();
             state.trial.claimed_at = Some(claim.claimed_at.unwrap_or_else(unix_now));
+            state.trial_token = claim.trial_token;
+            if let Some(server_time) = claim.server_time {
+                self.ensure_server_time_is_monotonic(&state, server_time)?;
+                state.last_server_time = Some(server_time);
+            }
             if !claim.trial_remaining_by_engine.is_empty() {
                 state
                     .trial
@@ -205,6 +294,29 @@ impl LicenseManager {
             .preflight(engine_id, requested_files))
     }
 
+    fn ensure_server_time_is_monotonic(
+        &self,
+        state: &LocalLicenseState,
+        server_time: i64,
+    ) -> Result<(), LicenseError> {
+        if state
+            .last_server_time
+            .is_some_and(|previous| server_time < previous)
+        {
+            return Err(LicenseError::ClockRollback);
+        }
+        Ok(())
+    }
+
+    fn store_lease(&self, lease: crate::licensing::models::LeasePayload) -> Result<(), LicenseError> {
+        let mut state = self.state.lock();
+        self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
+        state.lease_verified = true;
+        state.last_server_time = Some(lease.server_time);
+        state.lease = Some(lease);
+        self.store.save(&state)
+    }
+
     pub fn record_success(
         &self,
         engine_id: &str,
@@ -212,7 +324,7 @@ impl LicenseManager {
         output: &Path,
     ) -> Result<(), LicenseError> {
         let record = UsageRecord::from_paths(engine_id, input, output)?;
-        let device_fingerprint = self.identity()?.fingerprint();
+        let device_fingerprint = self.load_identity()?.fingerprint();
         let mut state = self.state.lock();
         if state
             .usage
@@ -237,7 +349,7 @@ impl LicenseManager {
     }
 
     pub async fn sync_pending_usage(&self) -> Result<(), LicenseError> {
-        let identity = self.identity()?;
+        let identity = self.load_identity()?;
         let pending = self.state.lock().usage.pending();
         if pending.is_empty() {
             return Ok(());
@@ -270,6 +382,24 @@ impl LicensingState {
 fn fingerprint_secret(value: &str) -> String {
     let digest = Sha256::digest(value.trim().as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+pub fn clock_is_trusted(last_trusted_server_time: i64, now: i64) -> bool {
+    now >= last_trusted_server_time
+}
+
+fn recovery_request_code(source: &str, last_server_time: Option<i64>) -> String {
+    let digest = Sha256::digest(
+        format!(
+            "{PRODUCT_ID}:{source}:{}",
+            last_server_time.unwrap_or_default()
+        )
+        .as_bytes(),
+    );
+    digest[..6]
+        .iter()
+        .map(|byte| format!("{byte:02X}"))
+        .collect()
 }
 
 #[cfg(test)]
