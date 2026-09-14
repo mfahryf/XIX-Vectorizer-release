@@ -485,6 +485,26 @@ fn local_clock_before_last_trusted_server_time_is_rejected() {
 }
 
 #[test]
+fn online_clock_recovery_accepts_a_current_server_after_a_stale_future_cache() {
+    assert!(crate::licensing::clock_recovery_is_trusted(2_000, 2_001));
+    assert!(crate::licensing::clock_recovery_is_trusted(2_000, 1_999));
+    assert!(!crate::licensing::clock_recovery_is_trusted(1_000, 2_000));
+    assert!(!crate::licensing::clock_recovery_is_trusted(2_000, 2_400));
+}
+
+#[test]
+fn gateway_provider_and_subscription_lock_states_are_mapped_before_cached_lease() {
+    assert_eq!(
+        crate::licensing::map_gateway_state("provider_inactive"),
+        Some(crate::licensing::models::LicenseState::ProviderInactive)
+    );
+    assert_eq!(
+        crate::licensing::map_gateway_state("subscription_expired"),
+        Some(crate::licensing::models::LicenseState::SubscriptionExpired)
+    );
+}
+
+#[test]
 fn licensed_access_decision_is_not_limited_by_trial_counter() {
     let decision = AccessDecision::allowed_with_state("pngtosvg", LicenseState::Licensed);
     assert!(decision.allowed);

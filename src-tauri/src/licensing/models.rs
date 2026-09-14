@@ -15,6 +15,7 @@ pub enum LicenseState {
     LicensedOffline,
     ExpiredOffline,
     SubscriptionExpired,
+    ProviderInactive,
     Revoked,
     DeviceConflict,
     DeviceIdentityLost,
@@ -84,6 +85,12 @@ pub struct GatewayStatus {
     pub signature: Option<String>,
     #[serde(default)]
     pub lease: Option<LeasePayload>,
+    #[serde(default)]
+    pub provider_status: Option<String>,
+    #[serde(default)]
+    pub subscription_status: Option<String>,
+    #[serde(default)]
+    pub access_status: Option<String>,
 }
 
 impl TrialState {
@@ -290,6 +297,9 @@ pub struct LicenseStatus {
     pub offline_days_remaining: Option<u16>,
     pub recovery_request_code: Option<String>,
     pub recovery_contact: Option<String>,
+    pub provider_status: Option<String>,
+    pub subscription_status: Option<String>,
+    pub access_status: Option<String>,
 }
 
 impl LicenseStatus {
@@ -316,6 +326,9 @@ impl LicenseStatus {
             offline_days_remaining: None,
             recovery_request_code: None,
             recovery_contact: None,
+            provider_status: None,
+            subscription_status: None,
+            access_status: None,
         }
     }
 }
@@ -336,6 +349,12 @@ pub struct LocalLicenseState {
     pub server_device_state: Option<String>,
     #[serde(default)]
     pub server_reason: Option<String>,
+    #[serde(default)]
+    pub server_provider_status: Option<String>,
+    #[serde(default)]
+    pub server_subscription_status: Option<String>,
+    #[serde(default)]
+    pub server_access_status: Option<String>,
 }
 
 impl Default for LocalLicenseState {
@@ -351,6 +370,9 @@ impl Default for LocalLicenseState {
             server_license_state: None,
             server_device_state: None,
             server_reason: None,
+            server_provider_status: None,
+            server_subscription_status: None,
+            server_access_status: None,
         }
     }
 }

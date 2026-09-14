@@ -68,8 +68,9 @@ impl LicenseClient {
         let gateway_public_key = option_env!("XIX_GATEWAY_PUBLIC_KEY_B64")
             .filter(|value| !value.trim().is_empty())
             .or(Some(PINNED_GATEWAY_PUBLIC_KEY_B64));
+        let gateway_url = option_env!("XIX_GATEWAY_URL").unwrap_or(DEFAULT_GATEWAY_URL);
         Self::new(
-            DEFAULT_GATEWAY_URL,
+            gateway_url,
             gateway_public_key,
         )
     }
@@ -166,7 +167,7 @@ impl LicenseClient {
                 "/v1/desktop/license/activate",
                 identity,
                 app_version,
-                [("license_key", Value::String(license_key.trim().to_string()))],
+                [("license_code", Value::String(license_key.trim().to_string()))],
             )
             .await?;
         self.parse_and_verify_lease(value, identity)

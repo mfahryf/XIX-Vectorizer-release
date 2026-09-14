@@ -32,9 +32,12 @@
     } else if (state === "licensed-offline") {
       badge = "OFFLINE LICENSE";
       message = "Lisensi aktif sementara tanpa koneksi.";
-    } else if (state === "subscription-expired") {
+    } else if (state === "subscription-expired" || state === "subscription_expired") {
       badge = "EXPIRED";
       message = "Langganan berakhir. Perbarui lisensi untuk melanjutkan.";
+    } else if (state === "provider_inactive" || state === "provider-inactive") {
+      badge = "MAYAR INACTIVE";
+      message = "Kode lisensi Mayar tidak aktif. Hubungi XIXLabs untuk bantuan.";
     } else if (state === "revoked") {
       badge = "REVOKED";
       message = "Lisensi dicabut. Hubungi admin untuk bantuan.";

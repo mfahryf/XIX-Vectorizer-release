@@ -34,21 +34,31 @@ $env:XIX_GATEWAY_PUBLIC_KEY_B64 = "<public-key-baru>"
 npm run dev
 ```
 
+Untuk menguji gateway lokal, URL juga dapat dioverride saat build dev:
+
+```powershell
+$env:XIX_GATEWAY_URL = "http://127.0.0.1:8000"
+npm run dev
+```
+
+Override ini hanya masuk ke build lokal; jangan menggunakannya untuk release.
+
 Jangan menaruh private key, API key, atau file lisensi nyata di repository.
 Hapus override setelah selesai agar pengujian kembali memakai key yang dipin.
 
 ## Matriks uji manual
 
-Gunakan satu akun sandbox dan produk `xix-vectorizer-monthly`.
+Gunakan satu akun sandbox dan produk Software License Mayar
+`f3e0891b-0d54-42dd-b89d-44767e5dd31e`.
 
 | Skenario | Hasil yang diharapkan |
 | --- | --- |
 | Fresh start, engine belum dipakai | Belum ada claim sebelum file pertama dimulai. |
 | Lima file berhasil pada satu engine | Engine tersebut terkunci; engine lain masih memiliki trial. |
 | File gagal, batal, atau retry idempoten | Kuota tidak berkurang dua kali. |
-| Aktivasi key valid | Semua engine terbuka dan key tidak disimpan mentah di UI/config. |
+| Aktivasi kode Mayar valid | Semua engine terbuka dan kode tidak disimpan mentah di UI/config. |
 | Aktivasi di perangkat kedua | Ditolak sebagai `device-conflict`; tidak membuat binding kedua. |
-| Tutup lalu buka kembali aplikasi | State lisensi dan identitas perangkat tetap terbaca. Ini padanan uji logout/login untuk desktop yang memakai license key. |
+| Tutup lalu buka kembali aplikasi | State lisensi dan identitas perangkat tetap terbaca. Ini padanan uji logout/login untuk desktop yang memakai kode Mayar. |
 | Hapus cache lease | Pada device yang sama, lease dapat diminta ulang ketika online. |
 | Hapus identitas perangkat | Aplikasi masuk recovery dan tidak membuat identitas pengganti diam-diam. |
 | Offline dengan lease valid | Pemrosesan tetap berjalan sampai paling lama 14 hari. |
@@ -62,4 +72,8 @@ Gunakan satu akun sandbox dan produk `xix-vectorizer-monthly`.
 - Catat product ID, device test, waktu aktivasi, dan hasil setiap skenario
   manual tanpa menyimpan license key atau secret.
 - Pastikan mode sandbox masih digunakan sampai seluruh alur stabil.
+- Uji kasus pembayaran 5 September dan aktivasi 12 September: periode harus
+  tetap berakhir 5 Oktober, bukan 12 Oktober.
+- Uji kode Mayar tetap `ACTIVE` tetapi periode XIXLabs sudah berakhir: akses
+  harus terkunci dengan pesan perpanjangan, bukan pesan kode Mayar kadaluarsa.
 - Uji build release terpisah setelah test development lulus.

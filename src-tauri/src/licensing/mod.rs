@@ -116,15 +116,9 @@ impl LicenseManager {
             Err(error) => return Err(error),
         };
         let now = unix_now();
-        if let Some(last_server_time) = local.last_server_time {
-            if !clock_is_trusted(last_server_time, now) {
-                let mut status = Status::trial_default();
-                status.license_state = LicenseState::ClockRollback;
-                status.device_state = "clock-rollback".into();
-                status.reason = Some("periksa waktu perangkat untuk melanjutkan".into());
-                return Ok(status);
-            }
-        }
+        let clock_rollback = local
+            .last_server_time
+            .is_some_and(|last_server_time| !clock_is_trusted(last_server_time, now));
         if let Some(token) = local.trial_token.as_ref() {
             self.client.validate_trial_token(token, &identity)?;
             if !local.trial.matches_token(token) {
@@ -138,7 +132,20 @@ impl LicenseManager {
         }
         if DeviceIdentityStore::path(&self.dir).exists() || self.has_cached_state(&local) {
             match self.refresh_from_server(&identity).await {
-                Ok(status) => return Ok(status),
+                Ok(status) => {
+                    let refreshed = self.state.lock().clone();
+                    if clock_rollback
+                        && refreshed
+                            .last_server_time
+                            .is_some_and(|server_time| !clock_is_trusted(server_time, unix_now()))
+                    {
+                        return Ok(clock_rollback_status());
+                    }
+                    return Ok(status);
+                }
+                Err(LicenseError::ClockRollback) if clock_rollback => {
+                    return Ok(clock_rollback_status());
+                }
                 Err(error)
                     if matches!(
                         error,
@@ -152,6 +159,9 @@ impl LicenseManager {
                     ) => return Err(error),
                 Err(_) => {}
             }
+        }
+        if clock_rollback {
+            return Ok(clock_rollback_status());
         }
         if local.trial.claimed_at.is_some() && local.trial_token.is_none() {
             return Err(LicenseError::InvalidTrialToken(
@@ -200,6 +210,9 @@ impl LicenseManager {
         status.license_key_fingerprint = local.license_key_fingerprint;
         status.reason = local.server_reason.clone();
         status.server_time = local.last_server_time;
+        status.provider_status = local.server_provider_status.clone();
+        status.subscription_status = local.server_subscription_status.clone();
+        status.access_status = local.server_access_status.clone();
         if let Some(server_state) = local.server_license_state.as_deref() {
             match map_gateway_state(server_state) {
                 Some(LicenseState::Revoked) => {
@@ -212,6 +225,10 @@ impl LicenseManager {
                 }
                 Some(LicenseState::SubscriptionExpired) => {
                     status.license_state = LicenseState::SubscriptionExpired;
+                    return Ok(status);
+                }
+                Some(LicenseState::ProviderInactive) => {
+                    status.license_state = LicenseState::ProviderInactive;
                     return Ok(status);
                 }
                 Some(LicenseState::ExpiredOffline) => {
@@ -322,6 +339,9 @@ impl LicenseManager {
             state.server_license_state = claim.status.license_state.clone();
             state.server_device_state = claim.status.device_state.clone();
             state.server_reason = claim.status.reason.clone();
+            state.server_provider_status = claim.status.provider_status.clone();
+            state.server_subscription_status = claim.status.subscription_status.clone();
+            state.server_access_status = claim.status.access_status.clone();
             if !claim.status.trial_remaining_by_engine.is_empty() {
                 state
                     .trial
@@ -343,7 +363,10 @@ impl LicenseManager {
     ) -> Result<(), LicenseError> {
         if state
             .last_server_time
-            .is_some_and(|previous| server_time < previous)
+            .is_some_and(|previous| {
+                server_time < previous
+                    && !clock_recovery_is_trusted(unix_now(), server_time)
+            })
         {
             return Err(LicenseError::ClockRollback);
         }
@@ -359,6 +382,9 @@ impl LicenseManager {
         state.server_license_state = response.license_state;
         state.server_device_state = response.device_state;
         state.server_reason = response.reason;
+        state.server_provider_status = response.provider_status;
+        state.server_subscription_status = response.subscription_status;
+        state.server_access_status = response.access_status;
         if !response.trial_remaining_by_engine.is_empty() {
             state
                 .trial
@@ -444,6 +470,23 @@ pub fn clock_is_trusted(last_trusted_server_time: i64, now: i64) -> bool {
     now >= last_trusted_server_time
 }
 
+/// Allows an online repair when an old cache was written with a future clock,
+/// while still rejecting a device clock that is materially behind the live
+/// server time. The five-minute window covers normal clock skew only.
+pub fn clock_recovery_is_trusted(local_now: i64, server_time: i64) -> bool {
+    const MAX_CLOCK_SKEW_SECONDS: i64 = 300;
+    server_time >= local_now.saturating_sub(MAX_CLOCK_SKEW_SECONDS)
+        && server_time <= local_now.saturating_add(MAX_CLOCK_SKEW_SECONDS)
+}
+
+fn clock_rollback_status() -> Status {
+    let mut status = Status::trial_default();
+    status.license_state = LicenseState::ClockRollback;
+    status.device_state = "clock-rollback".into();
+    status.reason = Some("periksa waktu perangkat untuk melanjutkan".into());
+    status
+}
+
 fn recovery_request_code(source: &str, last_server_time: Option<i64>) -> String {
     let digest = Sha256::digest(
         format!(
@@ -465,7 +508,12 @@ fn map_gateway_state(value: &str) -> Option<LicenseState> {
         "trial" | "trial-active" => Some(LicenseState::Trial),
         "unactivated" => Some(LicenseState::Unactivated),
         "expired-offline" => Some(LicenseState::ExpiredOffline),
-        "subscription-expired" | "expired" => Some(LicenseState::SubscriptionExpired),
+        "subscription_expired" | "subscription-expired" | "expired" => {
+            Some(LicenseState::SubscriptionExpired)
+        }
+        "provider_inactive" | "provider-inactive" | "provider_disabled" => {
+            Some(LicenseState::ProviderInactive)
+        }
         "revoked" | "revoke" => Some(LicenseState::Revoked),
         "device-conflict" => Some(LicenseState::DeviceConflict),
         _ => None,

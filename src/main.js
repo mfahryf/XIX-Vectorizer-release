@@ -10,9 +10,9 @@ const $ = (id) => document.getElementById(id);
 const win = getCurrentWindow();
 
 const APP_PALETTE = "sunset";
-// Sandbox checkout for the current Vectorizer product. Replace this public
-// URL at the production cutover; never put Mayar credentials in the desktop.
-const LICENSE_PURCHASE_URL = "https://web.mayar.club/payment-link/24f597d6-9505-4d30-9412-7d664a4309df";
+// Native Mayar Software License checkout. The provider creates and delivers
+// the license code; the desktop only sends that code to the XIXLabs gateway.
+const LICENSE_PURCHASE_URL = "https://xixlabs.myr.wtf/pl/xix-vectorizer-monthly-license-92882";
 
 const state = {
   engine: null,
@@ -73,14 +73,14 @@ async function refreshLicense(showMessage = true) {
     if (showMessage) setStatus("LISENSI DIVALIDASI", false);
   } catch (error) {
     if (showMessage) setStatus("VALIDASI LISENSI GAGAL", true);
-    $("license-status").textContent = "Hubungkan internet atau periksa license key.";
+    $("license-status").textContent = "Hubungkan internet atau periksa kode lisensi Mayar.";
   }
 }
 async function activateLicense() {
   const input = $("license-key");
   const licenseKey = input.value.trim();
   if (!licenseKey) {
-    $("license-status").textContent = "Masukkan license key dari email pembayaran.";
+    $("license-status").textContent = "Masukkan kode lisensi dari hasil atau email pembayaran Mayar.";
     return;
   }
   $("license-activate").disabled = true;

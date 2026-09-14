@@ -278,3 +278,25 @@ pemulihan, pembayaran, dan konflik perangkat.
 
 Harga, pajak, dan metode pembayaran tetap dikelola oleh Mayar. Desain visual
 dashboard admin dibahas dalam dokumen terpisah untuk repository `XIXLabs-admin`.
+
+## Amendment 2026-09-15: Mayar Software License sebagai provider
+
+Implementasi final memakai model hybrid:
+
+- Mayar menerbitkan `licenseCode` dan menjadi sumber status provider (`ACTIVE`,
+  `INACTIVE`, `DISABLED`, atau `EXPIRED`).
+- XIXLabs menyimpan fingerprint kode dan ciphertext server-side yang diperlukan
+  untuk verifikasi renewal; gateway tidak membuat kode pengganti.
+- Pembayaran menentukan `paid_at` dan `subscription_starts_at`; entitlement
+  bulanan berakhir 30 hari setelah periode mulai. Aktivasi yang terlambat tidak
+  menggeser tanggal akhir.
+- `provider_status`, `subscription_status`, dan `access_status` adalah tiga
+  informasi berbeda. Kode Mayar dapat tetap aktif saat langganan XIXLabs telah
+  berakhir dan akses dikunci.
+- Limit aktivasi dan tanggal kadaluarsa Mayar boleh tetap tidak terbatas. Gateway
+  sendiri menegakkan satu perangkat aktif dan lease paling lama 14 hari.
+- Checkout baru menggunakan URL produk Software License Mayar. Endpoint result
+  delivery internal hanya berlaku untuk produk invoice lama.
+
+Pada tanggal pembayaran 5 September dengan aktivasi 12 September, lease pertama
+berakhir paling jauh 26 September dan entitlement bulanan berakhir 5 Oktober.

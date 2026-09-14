@@ -34,10 +34,10 @@ lainnya.
 
 ### Aktivasi dan perangkat
 
-1. Selesaikan pembayaran bulanan melalui alur XIXLabs.
-2. Salin license key yang ditampilkan atau dikirim melalui email.
+1. Selesaikan pembayaran bulanan melalui [checkout Software License Mayar](https://xixlabs.myr.wtf/pl/xix-vectorizer-monthly-license-92882).
+2. Salin kode lisensi yang ditampilkan atau dikirim melalui email Mayar.
 3. Buka panel `LICENSE`, masukkan key, lalu pilih `ACTIVATE`.
-4. Satu lisensi hanya memiliki satu device binding aktif.
+4. Satu lisensi hanya memiliki satu device binding aktif di gateway XIXLabs.
 5. Penggantian komputer dilakukan oleh admin dengan mereset binding perangkat
    di layanan lisensi. Menghapus file lokal tidak mereset binding server.
 
@@ -77,7 +77,8 @@ canonical JSON `{"challenge":"...","device_id":"..."}`; tidak ada envelope
 atau private key penandatangan lease gateway. Binary membawa public verification
 key gateway yang dipin di source. `XIX_GATEWAY_PUBLIC_KEY_B64` hanya dipakai
 sebagai override saat rotasi key yang direncanakan; nilainya adalah public key,
-bukan secret.
+bukan secret. `XIX_GATEWAY_URL` dapat dipakai sebagai override build-time untuk
+gateway lokal saat development; release tetap memakai gateway production.
 
 Format lengkap request, response, lease, token trial, dan error ada di
 [`docs/DESKTOP-LICENSING-CONTRACT.md`](docs/DESKTOP-LICENSING-CONTRACT.md).
@@ -102,10 +103,17 @@ Aturan tampilan desktop lintas aplikasi XIXLabs ada di
 - [ ] Online setelah expired memperbarui lease bila langganan masih aktif.
 - [ ] Menghapus cache lease meminta validasi online pada device yang sama.
 - [ ] Kehilangan identitas device menampilkan state recovery.
-- [ ] Tidak ada secret produksi, cache lease, identitas device, ledger, atau
-      database lokal yang ikut Git.
+     database lokal yang ikut Git.
+Kode lisensi yang dimasukkan adalah `licenseCode` dari Mayar, bukan key yang
+dibuat gateway. Gateway memisahkan status provider Mayar dari status langganan
+bulanan XIXLabs; status provider dapat tetap aktif ketika akses bulanan sudah
+berakhir.
 
-Untuk pilot, gunakan endpoint gateway development dan key signing test. Buat
-satu produk Mayar untuk `xix-vectorizer-monthly`, lakukan satu transaksi test,
-aktivasi pada satu komputer, lalu simpan hasil verifikasi di catatan operasi
-gateway. Jangan memakai secret produksi di test lokal atau repository.
+Tidak ada secret produksi, cache lease, identitas device, ledger, atau
+database lokal yang ikut Git.
+
+Untuk pilot, gunakan product Software License Mayar dengan UUID
+`f3e0891b-0d54-42dd-b89d-44767e5dd31e` dan checkout yang tercantum di atas.
+Lakukan satu transaksi test, ambil kode dari halaman/email Mayar, lalu aktivasi
+pada satu komputer. Jangan memakai secret produksi di test lokal atau
+repository.
