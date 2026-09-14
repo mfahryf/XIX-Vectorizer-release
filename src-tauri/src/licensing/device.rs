@@ -62,6 +62,22 @@ impl DeviceIdentity {
         &self.registration_id
     }
 
+    pub fn verifying_key(&self) -> VerifyingKey {
+        self.public_key
+    }
+
+    /// Signs the gateway challenge exactly as specified by the desktop
+    /// contract. The signed message is the recursively sorted JSON object,
+    /// without a nonce, envelope, or transport headers.
+    pub fn sign_challenge(&self, challenge: &str) -> String {
+        let message = format!(
+            "{{\"challenge\":{},\"device_id\":{}}}",
+            serde_json::to_string(challenge).expect("challenge is always a string"),
+            serde_json::to_string(&self.registration_id).expect("device id is always a string")
+        );
+        BASE64.encode(self.signing_key.sign(message.as_bytes()).to_bytes())
+    }
+
     pub fn sign_request(&self, nonce: &str, payload: &[u8]) -> SignedRequest {
         let mut message = Vec::with_capacity(nonce.len() + payload.len() + 1);
         message.extend_from_slice(nonce.as_bytes());

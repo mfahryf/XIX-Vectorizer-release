@@ -8,10 +8,10 @@ pub mod secure;
 pub mod svg;
 pub mod tor;
 
-use crate::batch::run_batch;
+use crate::batch::{run_batch_with_trial_gate, TrialStartGate};
 use crate::config::{load as config_load, save as config_save, AppConfig};
 use crate::engines::{common_batch_options, EngineOptions, OptionDef};
-use crate::licensing::{AccessDecision, LicenseStatus, LicensingState};
+use crate::licensing::{AccessDecision, LicenseState, LicenseStatus, LicensingState};
 use crate::net::freeproxy::{self, Candidate};
 use crate::tor::{resolve_runtime, TorManager, TorRuntimePaths};
 use parking_lot::Mutex;
@@ -277,10 +277,15 @@ async fn start_batch(
     }
     let decision = licensing
         .manager
-        .preflight(&engine_id, files.len())
+        // Trial admission is enforced per file inside the rolling worker pool;
+        // a batch larger than the remaining quota may process its eligible
+        // files, while the next file is never started after the last success.
+        .preflight(&engine_id, 1)
         .await
         .map_err(|error| error.to_string())?;
     ensure_batch_allowed(&decision)?;
+    let trial_gate = matches!(decision.state, LicenseState::Trial)
+        .then(|| TrialStartGate::new(decision.remaining as usize));
     let batch_start = state.begin_start();
     if needs_tor(&options) {
         let _ = app.emit(
@@ -334,13 +339,14 @@ async fn start_batch(
     let usage_manager = licensing.manager.clone();
     let usage_engine_id = engine_id.clone();
     tauri::async_runtime::spawn(async move {
-        let (ok, fail) = run_batch(
+        let (ok, fail) = run_batch_with_trial_gate(
             make_engines,
             files,
             &out_dir,
             &options,
             cancel,
             pause,
+            trial_gate,
             move |ev| {
                 if let batch::BatchEvent::FileDone { input, output, .. } = &ev {
                     if let Err(error) = usage_manager.record_success(

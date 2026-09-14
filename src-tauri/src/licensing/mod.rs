@@ -6,15 +6,15 @@ pub mod storage;
 pub mod usage;
 
 pub use client::{
-    canonical_lease_bytes, canonical_trial_token_bytes, verify_lease_signature,
+    canonical_json, canonical_lease_bytes, canonical_trial_token_bytes, verify_lease_signature,
     verify_trial_token_signature, LicenseClient, TrialClaimResponse,
 };
 pub use usage::{UsageLedger, UsageRecord};
 
 pub use device::{DeviceIdentity, DeviceIdentityStore};
 pub use models::{
-    AccessDecision, LeasePayload, LicenseState, LicenseStatus, LocalLicenseState, TrialState,
-    TrialToken,
+    AccessDecision, GatewayStatus, LeasePayload, LicenseState, LicenseStatus, LocalLicenseState,
+    TrialState, TrialToken,
 };
 pub use storage::LicenseStore;
 
@@ -137,8 +137,20 @@ impl LicenseManager {
             self.client.validate_cached_lease(lease, &identity)?;
         }
         if DeviceIdentityStore::path(&self.dir).exists() || self.has_cached_state(&local) {
-            if let Ok(status) = self.refresh_from_server(&identity).await {
-                return Ok(status);
+            match self.refresh_from_server(&identity).await {
+                Ok(status) => return Ok(status),
+                Err(error)
+                    if matches!(
+                        error,
+                        LicenseError::Unauthorized
+                            | LicenseError::DeviceConflict
+                            | LicenseError::SubscriptionExpired
+                            | LicenseError::Revoked
+                            | LicenseError::InvalidLease(_)
+                            | LicenseError::InvalidTrialToken(_)
+                            | LicenseError::ClockRollback
+                    ) => return Err(error),
+                Err(_) => {}
             }
         }
         if local.trial.claimed_at.is_some() && local.trial_token.is_none() {
@@ -150,22 +162,24 @@ impl LicenseManager {
     }
 
     async fn refresh_from_server(&self, identity: &DeviceIdentity) -> Result<Status, LicenseError> {
-        let local = self.state.lock().clone();
-        let lease = if local.lease.is_some() {
-            Some(
-                self.client
-                    .renew(identity, env!("CARGO_PKG_VERSION"))
-                    .await?,
-            )
-        } else {
-            self.client
-                .status(identity, env!("CARGO_PKG_VERSION"))
-                .await?
-        };
-        let Some(lease) = lease else {
-            return Err(LicenseError::Network("lisensi belum aktif".into()));
-        };
-        self.store_lease(lease)?;
+        let mut response = self
+            .client
+            .status(identity, env!("CARGO_PKG_VERSION"))
+            .await?;
+        let renew_needed = matches!(
+            response.license_state.as_deref(),
+            Some("active" | "licensed" | "licensed-online" | "lease_expired")
+        ) && response
+            .lease
+            .as_ref()
+            .is_some_and(|lease| lease.lease_expires_at <= unix_now());
+        if renew_needed {
+            response = self
+                .client
+                .renew(identity, env!("CARGO_PKG_VERSION"))
+                .await?;
+        }
+        self.store_gateway_status(response)?;
         self.local_status_without_refresh().await
     }
 
@@ -178,9 +192,37 @@ impl LicenseManager {
         let local = self.state.lock().clone();
         let now = unix_now();
         let mut status = Status::trial_default();
-        status.device_state = if local.lease.is_some() { "bound" } else { "registered" }.into();
+        status.device_state = local
+            .server_device_state
+            .clone()
+            .unwrap_or_else(|| if local.lease.is_some() { "bound" } else { "registered" }.into());
         status.trial_remaining_by_engine = local.trial.remaining_by_engine();
         status.license_key_fingerprint = local.license_key_fingerprint;
+        status.reason = local.server_reason.clone();
+        status.server_time = local.last_server_time;
+        if let Some(server_state) = local.server_license_state.as_deref() {
+            match map_gateway_state(server_state) {
+                Some(LicenseState::Revoked) => {
+                    status.license_state = LicenseState::Revoked;
+                    return Ok(status);
+                }
+                Some(LicenseState::DeviceConflict) => {
+                    status.license_state = LicenseState::DeviceConflict;
+                    return Ok(status);
+                }
+                Some(LicenseState::SubscriptionExpired) => {
+                    status.license_state = LicenseState::SubscriptionExpired;
+                    return Ok(status);
+                }
+                Some(LicenseState::ExpiredOffline) => {
+                    status.license_state = LicenseState::ExpiredOffline;
+                    return Ok(status);
+                }
+                Some(LicenseState::Trial) => status.license_state = LicenseState::Trial,
+                Some(LicenseState::Unactivated) => status.license_state = LicenseState::Unactivated,
+                _ => {}
+            }
+        }
         if let Some(lease) = local.lease {
             status.subscription_expires_at = Some(lease.subscription_expires_at);
             status.lease_expires_at = Some(lease.lease_expires_at);
@@ -219,20 +261,17 @@ impl LicenseManager {
 
     pub async fn activate(&self, license_key: String) -> Result<Status, LicenseError> {
         let identity = self.ensure_identity()?;
-        let lease = self
+        let response = self
             .client
             .activate(&identity, env!("CARGO_PKG_VERSION"), &license_key)
             .await?;
         {
             let mut state = self.state.lock();
-            state.lease_verified = true;
-            self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
-            state.last_server_time = Some(lease.server_time);
             state.license_key_fingerprint = Some(fingerprint_secret(&license_key));
-            state.lease = Some(lease);
-            self.store.save(&state)?;
+            drop(state);
         }
-        self.status().await
+        self.store_gateway_status(response)?;
+        self.local_status_without_refresh().await
     }
 
     pub async fn refresh(&self) -> Result<Status, LicenseError> {
@@ -276,14 +315,17 @@ impl LicenseManager {
             let mut state = self.state.lock();
             state.trial.claimed_at = Some(claim.claimed_at.unwrap_or_else(unix_now));
             state.trial_token = claim.trial_token;
-            if let Some(server_time) = claim.server_time {
+            if let Some(server_time) = claim.status.server_time {
                 self.ensure_server_time_is_monotonic(&state, server_time)?;
                 state.last_server_time = Some(server_time);
             }
-            if !claim.trial_remaining_by_engine.is_empty() {
+            state.server_license_state = claim.status.license_state.clone();
+            state.server_device_state = claim.status.device_state.clone();
+            state.server_reason = claim.status.reason.clone();
+            if !claim.status.trial_remaining_by_engine.is_empty() {
                 state
                     .trial
-                    .set_remaining_by_engine(&claim.trial_remaining_by_engine);
+                    .set_remaining_by_engine(&claim.status.trial_remaining_by_engine);
             }
             self.store.save(&state)?;
         }
@@ -308,12 +350,26 @@ impl LicenseManager {
         Ok(())
     }
 
-    fn store_lease(&self, lease: crate::licensing::models::LeasePayload) -> Result<(), LicenseError> {
+    fn store_gateway_status(&self, response: GatewayStatus) -> Result<(), LicenseError> {
         let mut state = self.state.lock();
-        self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
-        state.lease_verified = true;
-        state.last_server_time = Some(lease.server_time);
-        state.lease = Some(lease);
+        if let Some(server_time) = response.server_time {
+            self.ensure_server_time_is_monotonic(&state, server_time)?;
+            state.last_server_time = Some(server_time);
+        }
+        state.server_license_state = response.license_state;
+        state.server_device_state = response.device_state;
+        state.server_reason = response.reason;
+        if !response.trial_remaining_by_engine.is_empty() {
+            state
+                .trial
+                .merge_remaining_by_engine(&response.trial_remaining_by_engine);
+        }
+        if let Some(lease) = response.lease {
+            self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
+            state.lease_verified = true;
+            state.last_server_time = Some(lease.server_time);
+            state.lease = Some(lease);
+        }
         self.store.save(&state)
     }
 
@@ -400,6 +456,20 @@ fn recovery_request_code(source: &str, last_server_time: Option<i64>) -> String 
         .iter()
         .map(|byte| format!("{byte:02X}"))
         .collect()
+}
+
+fn map_gateway_state(value: &str) -> Option<LicenseState> {
+    match value {
+        "active" | "licensed" | "licensed-online" => Some(LicenseState::Licensed),
+        "licensed-offline" => Some(LicenseState::LicensedOffline),
+        "trial" | "trial-active" => Some(LicenseState::Trial),
+        "unactivated" => Some(LicenseState::Unactivated),
+        "expired-offline" => Some(LicenseState::ExpiredOffline),
+        "subscription-expired" | "expired" => Some(LicenseState::SubscriptionExpired),
+        "revoked" | "revoke" => Some(LicenseState::Revoked),
+        "device-conflict" => Some(LicenseState::DeviceConflict),
+        _ => None,
+    }
 }
 
 #[cfg(test)]

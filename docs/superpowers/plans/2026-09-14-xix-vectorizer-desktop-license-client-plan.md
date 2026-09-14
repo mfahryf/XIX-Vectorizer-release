@@ -186,7 +186,7 @@ git commit -m "feat: add vectorizer licensing state and local ledger"
 
 Uji bahwa dua kali load menghasilkan public key dan fingerprint yang sama,
 private key tidak sama dengan blob terenkripsi, signature request berubah jika
-nonce atau payload berubah, dan lease yang sudah lewat ditolak.
+challenge atau payload berubah, dan lease yang sudah lewat ditolak.
 
 - [ ] **Step 2: Jalankan test RED.**
 
@@ -210,7 +210,7 @@ development hanya melalui build/test configuration. Client harus:
 1. Meminta challenge atau claim trial sesuai kontrak gateway.
 2. Menandatangani canonical JSON dengan private key perangkat.
 3. Mengirim `product_id`, versi aplikasi dari Tauri config, public key,
-   registration ID, nonce, dan signature.
+   registration ID, challenge, dan signature.
 4. Memverifikasi signature lease dengan public key gateway yang ditanam sebagai
    verification key, bukan private key.
 5. Memetakan HTTP 401/403/409/410/429/5xx ke error aplikasi yang aman.

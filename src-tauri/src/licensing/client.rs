@@ -1,13 +1,13 @@
-use crate::licensing::device::{DeviceIdentity, SignedRequest};
+use crate::licensing::device::DeviceIdentity;
 use crate::licensing::error::LicenseError;
-use crate::licensing::models::{LeasePayload, TrialToken, PRODUCT_ID, TRIAL_FILE_LIMIT};
+use crate::licensing::models::{GatewayStatus, LeasePayload, TrialToken, PRODUCT_ID, TRIAL_FILE_LIMIT};
 use crate::licensing::usage::UsageRecord;
-use base64::engine::general_purpose::STANDARD as BASE64;
+use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use base64::Engine;
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use reqwest::{Client, StatusCode};
 use serde::{Deserialize, Serialize};
-use serde_json::{json, Value};
+use serde_json::{Map, Value};
 use std::collections::BTreeMap;
 
 pub const DEFAULT_GATEWAY_URL: &str = "https://payment.xixlabs.net";
@@ -21,13 +21,18 @@ pub struct LicenseClient {
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
 pub struct TrialClaimResponse {
-    #[serde(default)]
-    pub trial_remaining_by_engine: BTreeMap<String, u8>,
+    #[serde(flatten)]
+    pub status: GatewayStatus,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub claimed_at: Option<i64>,
-    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
-    pub server_time: Option<i64>,
     pub trial_token: Option<TrialToken>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct DeviceChallengeResponse {
+    challenge: String,
+    #[serde(default)]
+    expires_at: Option<Value>,
 }
 
 impl LicenseClient {
@@ -126,34 +131,14 @@ impl LicenseClient {
         app_version: &str,
     ) -> Result<TrialClaimResponse, LicenseError> {
         let value = self
-            .post_signed(
-                "/v1/desktop/trial/claim",
-                identity,
-                app_version,
-                "trial_claim",
-                json!({}),
-            )
+            .post_state_changing("/v1/desktop/trial/claim", identity, app_version, [])
             .await?;
-        let source = value
-            .get("trial")
-            .or_else(|| value.get("data").and_then(|data| data.get("trial")))
-            .unwrap_or(&value);
-        let mut response: TrialClaimResponse = serde_json::from_value(source.clone())
-            .map_err(|error| LicenseError::InvalidTrialToken(error.to_string()))
-            ?;
+        let response: TrialClaimResponse = serde_json::from_value(value)
+            .map_err(|error| LicenseError::InvalidTrialToken(error.to_string()))?;
         let token = response.trial_token.as_ref().ok_or_else(|| {
             LicenseError::InvalidTrialToken("server tidak mengembalikan token trial".into())
         })?;
         self.validate_trial_token(token, identity)?;
-        if response.claimed_at.is_none() {
-            response.claimed_at = token
-                .payload
-                .get("claimed_at")
-                .and_then(parse_timestamp_value);
-        }
-        if response.server_time.is_none() {
-            response.server_time = source.get("server_time").and_then(parse_timestamp_value);
-        }
         Ok(response)
     }
 
@@ -162,17 +147,16 @@ impl LicenseClient {
         identity: &DeviceIdentity,
         app_version: &str,
         license_key: &str,
-    ) -> Result<LeasePayload, LicenseError> {
+    ) -> Result<GatewayStatus, LicenseError> {
         if license_key.trim().is_empty() {
             return Err(LicenseError::InvalidLicenseKey);
         }
         let value = self
-            .post_signed(
+            .post_state_changing(
                 "/v1/desktop/license/activate",
                 identity,
                 app_version,
-                "license_activate",
-                json!({ "license_key": license_key.trim() }),
+                [("license_key", Value::String(license_key.trim().to_string()))],
             )
             .await?;
         self.parse_and_verify_lease(value, identity)
@@ -182,49 +166,52 @@ impl LicenseClient {
         &self,
         identity: &DeviceIdentity,
         app_version: &str,
-    ) -> Result<Option<LeasePayload>, LicenseError> {
-        let nonce = uuid::Uuid::new_v4().to_string();
-        let payload = json!({
-            "action": "license_status",
-            "product_id": PRODUCT_ID,
-            "app_version": app_version,
-            "device_fingerprint": identity.fingerprint(),
-        });
-        let signed = identity.sign_request(&nonce, &canonical_json(&payload)?);
+    ) -> Result<GatewayStatus, LicenseError> {
+        let challenge = self.obtain_challenge(identity, app_version).await?;
+        let mut query = BTreeMap::new();
+        query.insert("device_id", identity.registration_id().to_string());
+        query.insert("public_key", identity.public_key_base64());
+        query.insert("public_key_fingerprint", identity.fingerprint());
+        query.insert("app_version", app_version.to_string());
+        query.insert("challenge", challenge.challenge.clone());
+        query.insert(
+            "signature",
+            identity.sign_challenge(&challenge.challenge),
+        );
         let response = self
             .http
             .get(self.endpoint("/v1/desktop/license/status"))
-            .headers(request_headers(&signed))
-            .query(&[
-                ("product_id", PRODUCT_ID),
-                ("app_version", app_version),
-                ("device_id", identity.registration_id()),
-                ("public_key", &identity.public_key_base64()),
-                ("public_key_fingerprint", &identity.fingerprint()),
-            ])
+            .header("X-Desktop-Product", PRODUCT_ID)
+            .query(&query)
             .send()
             .await
             .map_err(|error| LicenseError::Network(error.to_string()))?;
         let value = response_value(response).await?;
-        if value.is_null() || value.get("lease").is_some_and(Value::is_null) {
-            return Ok(None);
+        let status: GatewayStatus = serde_json::from_value(value)
+            .map_err(|error| LicenseError::Network(format!("respons status tidak valid: {error}")))?;
+        if status
+            .license_state
+            .as_deref()
+            .is_some_and(|state| matches!(state, "active" | "licensed" | "licensed-online"))
+            && status.lease.is_none()
+        {
+            return Err(LicenseError::InvalidLease(
+                "status aktif tidak menyertakan lease".into(),
+            ));
         }
-        self.parse_and_verify_lease(value, identity).map(Some)
+        if let Some(lease) = status.lease.as_ref() {
+            self.verify_lease(lease, identity)?;
+        }
+        Ok(status)
     }
 
     pub async fn renew(
         &self,
         identity: &DeviceIdentity,
         app_version: &str,
-    ) -> Result<LeasePayload, LicenseError> {
+    ) -> Result<GatewayStatus, LicenseError> {
         let value = self
-            .post_signed(
-                "/v1/desktop/license/renew",
-                identity,
-                app_version,
-                "license_renew",
-                json!({}),
-            )
+            .post_state_changing("/v1/desktop/license/renew", identity, app_version, [])
             .await?;
         self.parse_and_verify_lease(value, identity)
     }
@@ -235,52 +222,97 @@ impl LicenseClient {
         app_version: &str,
         record: &UsageRecord,
     ) -> Result<(), LicenseError> {
-        let _ = self
-            .post_signed(
+        let value = self
+            .post_state_changing(
                 "/v1/desktop/usage/record",
                 identity,
                 app_version,
-                "usage_record",
-                serde_json::to_value(record)
-                    .map_err(|error| LicenseError::Network(error.to_string()))?,
+                [
+                    ("engine_id", Value::String(record.engine_id.clone())),
+                    ("usage_event_id", Value::String(record.event_id.clone())),
+                    (
+                        "input_fingerprint",
+                        Value::String(record.input_fingerprint.clone()),
+                    ),
+                    (
+                        "output_fingerprint",
+                        Value::String(record.output_fingerprint.clone()),
+                    ),
+                ],
             )
             .await?;
+        if value.get("duplicate").and_then(Value::as_bool) == Some(true) {
+            return Ok(());
+        }
+        if value.get("accepted").and_then(Value::as_bool) != Some(true) {
+            let reason = value
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("server menolak pencatatan usage");
+            return Err(LicenseError::Network(reason.to_string()));
+        }
         Ok(())
     }
 
-    async fn post_signed(
+    async fn obtain_challenge(
+        &self,
+        identity: &DeviceIdentity,
+        app_version: &str,
+    ) -> Result<DeviceChallengeResponse, LicenseError> {
+        let body = serde_json::json!({
+            "device_id": identity.registration_id(),
+            "public_key": identity.public_key_base64(),
+            "public_key_fingerprint": identity.fingerprint(),
+            "platform": std::env::consts::OS,
+            "app_version": app_version,
+        });
+        let response = self
+            .http
+            .post(self.endpoint("/v1/desktop/device/challenge"))
+            .header("X-Desktop-Product", PRODUCT_ID)
+            .json(&body)
+            .send()
+            .await
+            .map_err(|error| LicenseError::Network(error.to_string()))?;
+        let value = response_value(response).await?;
+        let challenge: DeviceChallengeResponse = serde_json::from_value(value)
+            .map_err(|error| LicenseError::Network(format!("challenge tidak valid: {error}")))?;
+        if challenge.challenge.trim().is_empty() || challenge.expires_at.is_none() {
+            return Err(LicenseError::Network("server mengembalikan challenge kosong".into()));
+        }
+        Ok(challenge)
+    }
+
+    async fn post_state_changing<const N: usize>(
         &self,
         path: &str,
         identity: &DeviceIdentity,
         app_version: &str,
-        action: &str,
-        payload: Value,
+        extra: [(&str, Value); N],
     ) -> Result<Value, LicenseError> {
-        let nonce = uuid::Uuid::new_v4().to_string();
-        let signed_payload = json!({
-            "action": action,
-            "product_id": PRODUCT_ID,
-            "app_version": app_version,
-            "payload": payload,
-        });
-        let signed = identity.sign_request(&nonce, &canonical_json(&signed_payload)?);
-        let body = json!({
-            "product_id": PRODUCT_ID,
-            "app_version": app_version,
-            "device_id": identity.registration_id(),
-            "action": action,
-            "payload": payload,
-            "public_key": signed.public_key,
-            "device_fingerprint": signed.device_fingerprint,
-            "registration_id": signed.registration_id,
-            "nonce": signed.nonce,
-            "signature": signed.signature,
-        });
+        let challenge = self.obtain_challenge(identity, app_version).await?;
+        let mut body = Map::new();
+        body.insert("device_id".into(), Value::String(identity.registration_id().into()));
+        body.insert("public_key".into(), Value::String(identity.public_key_base64()));
+        body.insert(
+            "public_key_fingerprint".into(),
+            Value::String(identity.fingerprint()),
+        );
+        body.insert("platform".into(), Value::String(std::env::consts::OS.into()));
+        body.insert("app_version".into(), Value::String(app_version.to_string()));
+        body.insert("challenge".into(), Value::String(challenge.challenge.clone()));
+        body.insert(
+            "signature".into(),
+            Value::String(identity.sign_challenge(&challenge.challenge)),
+        );
+        for (key, value) in extra {
+            body.insert(key.into(), value);
+        }
         let response = self
             .http
             .post(self.endpoint(path))
             .header("X-Desktop-Product", PRODUCT_ID)
-            .json(&body)
+            .json(&Value::Object(body))
             .send()
             .await
             .map_err(|error| LicenseError::Network(error.to_string()))?;
@@ -291,61 +323,40 @@ impl LicenseClient {
         &self,
         value: Value,
         identity: &DeviceIdentity,
-    ) -> Result<LeasePayload, LicenseError> {
-        let source = value
-            .get("lease")
-            .or_else(|| value.get("data").and_then(|data| data.get("lease")))
-            .unwrap_or(&value);
-        let lease: LeasePayload = serde_json::from_value(source.clone())
+    ) -> Result<GatewayStatus, LicenseError> {
+        let status: GatewayStatus = serde_json::from_value(value)
             .map_err(|error| LicenseError::InvalidLease(error.to_string()))?;
+        let lease = status.lease.as_ref().ok_or_else(|| {
+            LicenseError::InvalidLease("server tidak mengembalikan lease".into())
+        })?;
+        self.verify_lease(lease, identity)?;
+        Ok(status)
+    }
+
+    fn verify_lease(&self, lease: &LeasePayload, identity: &DeviceIdentity) -> Result<(), LicenseError> {
         let key = self.gateway_public_key.as_ref().ok_or_else(|| {
             LicenseError::InvalidLease(
                 "verification key gateway belum dipasang pada build ini".into(),
             )
         })?;
-        if !verify_lease_signature(&lease, key) {
-            return Err(LicenseError::InvalidLease(
-                "signature lease tidak cocok".into(),
-            ));
+        if !verify_lease_signature(lease, key) {
+            return Err(LicenseError::InvalidLease("signature lease tidak cocok".into()));
         }
-        let now = lease.server_time;
-        if !lease.is_valid_for(PRODUCT_ID, &identity.fingerprint(), now) {
+        if !lease.is_valid_for(PRODUCT_ID, &identity.fingerprint(), lease.server_time) {
             return Err(LicenseError::InvalidLease(
                 "isi lease tidak sesuai perangkat atau masa berlaku".into(),
             ));
         }
-        Ok(lease)
+        Ok(())
     }
 }
 
 fn parse_public_key(value: &str) -> Result<VerifyingKey, LicenseError> {
-    let bytes = BASE64
-        .decode(value.trim())
-        .map_err(|error| LicenseError::Configuration(error.to_string()))?;
+    let bytes = decode_signature(value)?;
     let bytes: [u8; 32] = bytes
         .try_into()
         .map_err(|_| LicenseError::Configuration("verification key harus 32 byte".into()))?;
     VerifyingKey::from_bytes(&bytes).map_err(|error| LicenseError::Configuration(error.to_string()))
-}
-
-fn request_headers(signed: &SignedRequest) -> reqwest::header::HeaderMap {
-    let mut headers = reqwest::header::HeaderMap::new();
-    let values = [
-        ("X-Device-Public-Key", signed.public_key.as_str()),
-        ("X-Device-Fingerprint", signed.device_fingerprint.as_str()),
-        ("X-Device-Registration", signed.registration_id.as_str()),
-        ("X-Device-Nonce", signed.nonce.as_str()),
-        ("X-Device-Signature", signed.signature.as_str()),
-    ];
-    for (name, value) in values {
-        if let (Ok(header_name), Ok(header_value)) = (
-            reqwest::header::HeaderName::from_bytes(name.as_bytes()),
-            reqwest::header::HeaderValue::from_str(value),
-        ) {
-            headers.insert(header_name, header_value);
-        }
-    }
-    headers
 }
 
 async fn response_value(response: reqwest::Response) -> Result<Value, LicenseError> {
@@ -354,7 +365,8 @@ async fn response_value(response: reqwest::Response) -> Result<Value, LicenseErr
         .text()
         .await
         .map_err(|error| LicenseError::Network(error.to_string()))?;
-    let value: Value = serde_json::from_str(&body).unwrap_or_else(|_| json!({ "message": body }));
+    let value: Value = serde_json::from_str(&body)
+        .unwrap_or_else(|_| serde_json::json!({ "message": "respons server bukan JSON" }));
     if !status.is_success() {
         return Err(match status {
             StatusCode::UNAUTHORIZED => LicenseError::Unauthorized,
@@ -375,51 +387,85 @@ async fn response_value(response: reqwest::Response) -> Result<Value, LicenseErr
     Ok(value)
 }
 
+/// Canonical JSON for signatures. Object keys are sorted at every nesting
+/// level; arrays preserve their order and scalar JSON uses serde_json's exact
+/// representation.
 pub fn canonical_json(value: &Value) -> Result<Vec<u8>, LicenseError> {
-    serde_json::to_vec(value).map_err(|error| LicenseError::Configuration(error.to_string()))
+    let mut output = Vec::new();
+    write_canonical_json(value, &mut output)?;
+    Ok(output)
+}
+
+fn write_canonical_json(value: &Value, output: &mut Vec<u8>) -> Result<(), LicenseError> {
+    match value {
+        Value::Null => output.extend_from_slice(b"null"),
+        Value::Bool(value) => output.extend_from_slice(if *value { b"true" } else { b"false" }),
+        Value::Number(value) => output.extend_from_slice(value.to_string().as_bytes()),
+        Value::String(value) => output.extend_from_slice(
+            &serde_json::to_vec(value)
+                .map_err(|error| LicenseError::Configuration(error.to_string()))?,
+        ),
+        Value::Array(values) => {
+            output.push(b'[');
+            for (index, value) in values.iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                write_canonical_json(value, output)?;
+            }
+            output.push(b']');
+        }
+        Value::Object(values) => {
+            let mut keys: Vec<&String> = values.keys().collect();
+            keys.sort();
+            output.push(b'{');
+            for (index, key) in keys.into_iter().enumerate() {
+                if index != 0 {
+                    output.push(b',');
+                }
+                output.extend_from_slice(
+                    &serde_json::to_vec(key)
+                        .map_err(|error| LicenseError::Configuration(error.to_string()))?,
+                );
+                output.push(b':');
+                write_canonical_json(&values[key], output)?;
+            }
+            output.push(b'}');
+        }
+    }
+    Ok(())
 }
 
 pub fn canonical_lease_bytes(lease: &LeasePayload) -> Vec<u8> {
-    let mut value = serde_json::to_value(lease).unwrap_or_else(|_| json!({}));
+    let mut value = serde_json::to_value(lease).unwrap_or_else(|_| serde_json::json!({}));
     if let Some(object) = value.as_object_mut() {
         object.remove("signature");
     }
-    serde_json::to_vec(&value).unwrap_or_default()
+    canonical_json(&value).unwrap_or_default()
 }
 
 pub fn verify_lease_signature(lease: &LeasePayload, key: &VerifyingKey) -> bool {
-    let Ok(bytes) = BASE64.decode(lease.signature.trim()) else {
+    let Ok(bytes) = decode_signature(&lease.signature) else {
         return false;
     };
     let Ok(signature) = Signature::from_slice(&bytes) else {
         return false;
     };
-    key.verify(&canonical_lease_bytes(lease), &signature)
-        .is_ok()
+    key.verify(&canonical_lease_bytes(lease), &signature).is_ok()
 }
 
 pub fn canonical_trial_token_bytes(payload: &Value) -> Vec<u8> {
-    serde_json::to_vec(payload).unwrap_or_default()
+    canonical_json(payload).unwrap_or_default()
 }
 
-pub fn verify_trial_token_signature(
-    payload: &Value,
-    signature: &str,
-    key: &VerifyingKey,
-) -> bool {
-    let decoded = BASE64
-        .decode(signature.trim())
-        .or_else(|_| {
-            base64::engine::general_purpose::URL_SAFE_NO_PAD.decode(signature.trim())
-        });
-    let Ok(bytes) = decoded else {
+pub fn verify_trial_token_signature(payload: &Value, signature: &str, key: &VerifyingKey) -> bool {
+    let Ok(bytes) = decode_signature(signature) else {
         return false;
     };
     let Ok(signature) = Signature::from_slice(&bytes) else {
         return false;
     };
-    key.verify(&canonical_trial_token_bytes(payload), &signature)
-        .is_ok()
+    key.verify(&canonical_trial_token_bytes(payload), &signature).is_ok()
 }
 
 fn valid_trial_counters(payload: &Value) -> bool {
@@ -429,12 +475,19 @@ fn valid_trial_counters(payload: &Value) -> bool {
     else {
         return false;
     };
-    !counters.is_empty() && counters.iter().all(|(engine_id, remaining)| {
-        crate::licensing::models::ENGINE_IDS.contains(&engine_id.as_str())
-            && remaining
-                .as_u64()
-                .is_some_and(|value| value <= u64::from(TRIAL_FILE_LIMIT))
+    crate::licensing::models::ENGINE_IDS.iter().all(|engine_id| {
+        counters
+            .get(*engine_id)
+            .and_then(Value::as_u64)
+            .is_some_and(|value| value <= u64::from(TRIAL_FILE_LIMIT))
     })
+}
+
+fn decode_signature(value: &str) -> Result<Vec<u8>, LicenseError> {
+    BASE64
+        .decode(value.trim())
+        .or_else(|_| URL_SAFE_NO_PAD.decode(value.trim()))
+        .map_err(|error| LicenseError::Configuration(error.to_string()))
 }
 
 fn deserialize_optional_timestamp<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
@@ -442,52 +495,5 @@ where
     D: serde::Deserializer<'de>,
 {
     let value = Option::<Value>::deserialize(deserializer)?;
-    Ok(value.as_ref().and_then(parse_timestamp_value))
-}
-
-fn parse_timestamp_value(value: &Value) -> Option<i64> {
-    value.as_i64().or_else(|| value.as_str().and_then(parse_rfc3339))
-}
-
-fn parse_rfc3339(value: &str) -> Option<i64> {
-    let (date, time_and_zone) = value.split_once('T').or_else(|| value.split_once(' '))?;
-    let mut date_parts = date.split('-');
-    let year: i64 = date_parts.next()?.parse().ok()?;
-    let month: i64 = date_parts.next()?.parse().ok()?;
-    let day: i64 = date_parts.next()?.parse().ok()?;
-    let (time, zone) = if let Some((time, zone)) = time_and_zone.split_once('Z') {
-        (time, format!("Z{zone}"))
-    } else if let Some(index) = time_and_zone.rfind(['+', '-']) {
-        (&time_and_zone[..index], time_and_zone[index..].to_string())
-    } else {
-        (time_and_zone, "Z".into())
-    };
-    let mut time_parts = time.split(':');
-    let hour: i64 = time_parts.next()?.parse().ok()?;
-    let minute: i64 = time_parts.next()?.parse().ok()?;
-    let second: i64 = time_parts
-        .next()?
-        .split('.')
-        .next()?
-        .parse()
-        .ok()?;
-    let offset_seconds = if zone == "Z" {
-        0
-    } else {
-        let sign = if zone.starts_with('-') { -1 } else { 1 };
-        let offset = zone.get(1..)?.split_once(':')?;
-        sign * (offset.0.parse::<i64>().ok()? * 3_600 + offset.1.parse::<i64>().ok()? * 60)
-    };
-    let adjusted_year = year - i64::from(month <= 2);
-    let era = if adjusted_year >= 0 {
-        adjusted_year / 400
-    } else {
-        (adjusted_year - 399) / 400
-    };
-    let year_of_era = adjusted_year - era * 400;
-    let month_index = month + if month > 2 { -3 } else { 9 };
-    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
-    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
-    let days = era * 146_097 + day_of_era - 719_468;
-    Some(days * 86_400 + hour * 3_600 + minute * 60 + second - offset_seconds)
+    Ok(value.and_then(|value| value.as_i64()))
 }

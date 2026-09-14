@@ -58,6 +58,67 @@ pub fn clamp_concurrency(v: Option<f64>) -> usize {
     n.clamp(1.0, 8.0) as usize
 }
 
+#[derive(Default)]
+struct TrialGateState {
+    available: usize,
+    in_flight: usize,
+}
+
+/// Per-file trial admission. A permit is held for the complete processing
+/// attempt, released on failure/cancellation, and consumed only on success.
+/// This keeps concurrent workers from starting file N+1 while still allowing
+/// a failed file to be replaced.
+pub struct TrialStartGate {
+    state: Mutex<TrialGateState>,
+    notify: tokio::sync::Notify,
+}
+
+impl TrialStartGate {
+    pub fn new(remaining: usize) -> Arc<Self> {
+        Arc::new(Self {
+            state: Mutex::new(TrialGateState {
+                available: remaining,
+                in_flight: 0,
+            }),
+            notify: tokio::sync::Notify::new(),
+        })
+    }
+
+    async fn acquire(&self, cancel: &AtomicBool) -> bool {
+        loop {
+            if cancel.load(Ordering::Relaxed) {
+                return false;
+            }
+            let notified = {
+                let mut state = self.state.lock();
+                if state.available > 0 {
+                    state.available -= 1;
+                    state.in_flight += 1;
+                    return true;
+                }
+                if state.in_flight == 0 {
+                    return false;
+                }
+                self.notify.notified()
+            };
+            notified.await;
+        }
+    }
+
+    fn success(&self) {
+        let mut state = self.state.lock();
+        state.in_flight = state.in_flight.saturating_sub(1);
+        self.notify.notify_waiters();
+    }
+
+    fn release(&self) {
+        let mut state = self.state.lock();
+        state.in_flight = state.in_flight.saturating_sub(1);
+        state.available = state.available.saturating_add(1);
+        self.notify.notify_one();
+    }
+}
+
 /// Sleep terpotong kecil-kecil supaya cancel dihormati.
 async fn sleep_interruptible(secs: f64, cancel: &AtomicBool) {
     let mut remaining = secs;
@@ -118,6 +179,33 @@ pub async fn run_batch<F, E>(
     opts: &EngineOptions,
     cancel: Arc<AtomicBool>,
     pause: Arc<AtomicBool>,
+    on_event: F,
+) -> (u32, u32)
+where
+    F: FnMut(BatchEvent),
+    E: Engine + Send + 'static,
+{
+    run_batch_with_trial_gate(
+        engines_for_worker,
+        files,
+        out_dir,
+        opts,
+        cancel,
+        pause,
+        None,
+        on_event,
+    )
+    .await
+}
+
+pub async fn run_batch_with_trial_gate<F, E>(
+    engines_for_worker: impl Fn(usize) -> E,
+    files: Vec<PathBuf>,
+    out_dir: &Path,
+    opts: &EngineOptions,
+    cancel: Arc<AtomicBool>,
+    pause: Arc<AtomicBool>,
+    trial_gate: Option<Arc<TrialStartGate>>,
     mut on_event: F,
 ) -> (u32, u32)
 where
@@ -266,6 +354,7 @@ where
         let engine = engines_for_worker(worker_index);
         let out_dir_val = out_dir_owned.clone();
         let opts_val = opts_owned.clone();
+        let trial_gate = trial_gate.clone();
         handles.push(tauri::async_runtime::spawn(async move {
             let out_dir: &Path = &out_dir_val;
             let opts: &EngineOptions = &opts_val;
@@ -328,6 +417,14 @@ where
                     .and_then(|s| s.to_str())
                     .unwrap_or("?")
                     .to_string();
+                let permit = if let Some(gate) = trial_gate.as_ref() {
+                    if !gate.acquire(&*worker_cancel).await {
+                        return;
+                    }
+                    true
+                } else {
+                    false
+                };
                 match process_file!(
                     engine,
                     |ev| {
@@ -339,9 +436,19 @@ where
                     opts
                 ) {
                     Ok(()) => {
+                        if permit {
+                            if worker_cancel.load(Ordering::Relaxed) {
+                                trial_gate.as_ref().unwrap().release();
+                                continue;
+                            }
+                            trial_gate.as_ref().unwrap().success();
+                        }
                         let _ = tx.send(WorkerMsg::Ok);
                     }
                     Err(Some(msg)) => {
+                        if permit {
+                            trial_gate.as_ref().unwrap().release();
+                        }
                         let is_rate_limit = msg.contains("rate limit");
                         let name = file_name;
                         let _ =
@@ -353,7 +460,11 @@ where
                             let _ = tx.send(WorkerMsg::Fail);
                         }
                     }
-                    Err(None) => {} // dibatalkan saat backoff 403
+                    Err(None) => {
+                        if permit {
+                            trial_gate.as_ref().unwrap().release();
+                        }
+                    } // dibatalkan saat backoff 403
                 }
             }
         }));
@@ -476,6 +587,41 @@ mod tests {
         E: crate::engines::Engine + 'static,
     {
         move |_| make()
+    }
+
+    #[tokio::test]
+    async fn trial_gate_replaces_failures_but_never_starts_file_after_last_success() {
+        let dir = std::env::temp_dir().join("xix-batch-trial-gate");
+        std::fs::create_dir_all(&dir).unwrap();
+        let files: Vec<PathBuf> = (0..3).map(|i| dir.join(format!("{i}.png"))).collect();
+        for file in &files {
+            std::fs::write(file, b"x").unwrap();
+        }
+        let mut events = Vec::new();
+        let options = EngineOptions::from([
+            ("batch_delay".to_string(), serde_json::json!(0)),
+            ("concurrency".to_string(), serde_json::json!(1)),
+            ("retry_403".to_string(), serde_json::json!(false)),
+        ]);
+
+        let result = run_batch_with_trial_gate(
+            factory_for(|| FakeEngine::fail_n_times(1, EngineError::Other("failed".into()))),
+            files,
+            &dir,
+            &options,
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            Some(TrialStartGate::new(1)),
+            |event| events.push(event),
+        )
+        .await;
+
+        assert_eq!(result, (1, 1));
+        let starts = events
+            .iter()
+            .filter(|event| matches!(event, BatchEvent::FileStart { .. }))
+            .count();
+        assert_eq!(starts, 2, "file gagal boleh diganti, file N+1 tidak boleh mulai");
     }
 
     #[tokio::test]

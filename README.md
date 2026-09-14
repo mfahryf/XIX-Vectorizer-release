@@ -71,10 +71,15 @@ HTTPS. Endpoint yang digunakan:
 - `POST /v1/desktop/license/renew`
 - `POST /v1/desktop/usage/record`
 
-Request ditandatangani private key perangkat. Desktop tidak menyimpan API key
-Mayar, Google Auth secret, atau private key penandatangan lease gateway. Build
-rilis harus menyertakan public verification key gateway melalui konfigurasi
-build `XIX_GATEWAY_PUBLIC_KEY_B64`; nilai ini adalah public key, bukan secret.
+Setiap request memakai challenge sekali-pakai dari gateway. Signature mencakup
+canonical JSON `{"challenge":"...","device_id":"..."}`; tidak ada envelope
+`payload/nonce`. Desktop tidak menyimpan API key Mayar, Google Auth secret,
+atau private key penandatangan lease gateway. Build rilis harus menyertakan
+public verification key gateway melalui konfigurasi build
+`XIX_GATEWAY_PUBLIC_KEY_B64`; nilai ini adalah public key, bukan secret.
+
+Format lengkap request, response, lease, token trial, dan error ada di
+[`docs/DESKTOP-LICENSING-CONTRACT.md`](docs/DESKTOP-LICENSING-CONTRACT.md).
 
 ### Checklist verifikasi rilis
 

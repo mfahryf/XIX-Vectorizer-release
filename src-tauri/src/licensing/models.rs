@@ -58,6 +58,34 @@ pub struct TrialToken {
     pub signature: String,
 }
 
+/// Flat status returned by the canonical desktop gateway contract. The
+/// optional fields let the client distinguish a valid active lease from
+/// server states such as revoked or device-conflict without inventing a
+/// wrapper around the gateway response.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GatewayStatus {
+    #[serde(default)]
+    pub license_state: Option<String>,
+    #[serde(default)]
+    pub device_state: Option<String>,
+    #[serde(default)]
+    pub trial_remaining_by_engine: BTreeMap<String, u8>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub subscription_expires_at: Option<i64>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub lease_expires_at: Option<i64>,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
+    pub server_time: Option<i64>,
+    #[serde(default)]
+    pub key_id: Option<String>,
+    #[serde(default)]
+    pub signature: Option<String>,
+    #[serde(default)]
+    pub lease: Option<LeasePayload>,
+}
+
 impl TrialState {
     pub fn new<I, S>(engine_ids: I) -> Self
     where
@@ -126,6 +154,18 @@ impl TrialState {
             if let Some(remaining) = remaining.get(engine_id) {
                 engine.successful_files =
                     TRIAL_FILE_LIMIT.saturating_sub((*remaining).min(TRIAL_FILE_LIMIT));
+            }
+        }
+    }
+
+    /// Merge a server snapshot without undoing successful files that were
+    /// completed locally but are still waiting to be synchronized.
+    pub fn merge_remaining_by_engine(&mut self, remaining: &BTreeMap<String, u8>) {
+        for (engine_id, engine) in &mut self.engines {
+            if let Some(remaining) = remaining.get(engine_id) {
+                let server_successes =
+                    TRIAL_FILE_LIMIT.saturating_sub((*remaining).min(TRIAL_FILE_LIMIT));
+                engine.successful_files = engine.successful_files.max(server_successes);
             }
         }
     }
@@ -290,6 +330,12 @@ pub struct LocalLicenseState {
     pub last_server_time: Option<i64>,
     pub license_key_fingerprint: Option<String>,
     pub usage: UsageLedger,
+    #[serde(default)]
+    pub server_license_state: Option<String>,
+    #[serde(default)]
+    pub server_device_state: Option<String>,
+    #[serde(default)]
+    pub server_reason: Option<String>,
 }
 
 impl Default for LocalLicenseState {
@@ -302,6 +348,59 @@ impl Default for LocalLicenseState {
             last_server_time: None,
             license_key_fingerprint: None,
             usage: UsageLedger::default(),
+            server_license_state: None,
+            server_device_state: None,
+            server_reason: None,
         }
     }
+}
+
+fn deserialize_optional_timestamp<'de, D>(deserializer: D) -> Result<Option<i64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let value = Option::<Value>::deserialize(deserializer)?;
+    Ok(value.as_ref().and_then(parse_timestamp_value))
+}
+
+fn parse_timestamp_value(value: &Value) -> Option<i64> {
+    value.as_i64().or_else(|| value.as_str().and_then(parse_rfc3339))
+}
+
+fn parse_rfc3339(value: &str) -> Option<i64> {
+    let (date, time_and_zone) = value.split_once('T').or_else(|| value.split_once(' '))?;
+    let mut date_parts = date.split('-');
+    let year: i64 = date_parts.next()?.parse().ok()?;
+    let month: i64 = date_parts.next()?.parse().ok()?;
+    let day: i64 = date_parts.next()?.parse().ok()?;
+    let (time, zone) = if let Some((time, _)) = time_and_zone.split_once('Z') {
+        (time, "Z".to_string())
+    } else if let Some(index) = time_and_zone.rfind(['+', '-']) {
+        (&time_and_zone[..index], time_and_zone[index..].to_string())
+    } else {
+        (time_and_zone, "Z".to_string())
+    };
+    let mut time_parts = time.split(':');
+    let hour: i64 = time_parts.next()?.parse().ok()?;
+    let minute: i64 = time_parts.next()?.parse().ok()?;
+    let second: i64 = time_parts.next()?.split('.').next()?.parse().ok()?;
+    let offset_seconds = if zone == "Z" {
+        0
+    } else {
+        let sign = if zone.starts_with('-') { -1 } else { 1 };
+        let offset = zone.get(1..)?.split_once(':')?;
+        sign * (offset.0.parse::<i64>().ok()? * 3_600 + offset.1.parse::<i64>().ok()? * 60)
+    };
+    let adjusted_year = year - i64::from(month <= 2);
+    let era = if adjusted_year >= 0 {
+        adjusted_year / 400
+    } else {
+        (adjusted_year - 399) / 400
+    };
+    let year_of_era = adjusted_year - era * 400;
+    let month_index = month + if month > 2 { -3 } else { 9 };
+    let day_of_year = (153 * month_index + 2) / 5 + day - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    let days = era * 146_097 + day_of_era - 719_468;
+    Some(days * 86_400 + hour * 3_600 + minute * 60 + second - offset_seconds)
 }

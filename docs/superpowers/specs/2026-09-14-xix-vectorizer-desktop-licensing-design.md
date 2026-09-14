@@ -138,8 +138,8 @@ aplikasi terhubung kembali.
 ## Alur aktivasi dan validasi
 
 1. Pengguna memasukkan license key pada halaman aktivasi.
-2. Aplikasi mengirim key, produk, versi aplikasi, identitas perangkat, nonce,
-   dan tanda tangan permintaan melalui HTTPS.
+2. Aplikasi meminta challenge sekali-pakai, lalu mengirim key, produk, versi
+   aplikasi, identitas perangkat, challenge, dan tanda tangan melalui HTTPS.
 3. Server memeriksa key, masa langganan, status revoke, dan device binding.
 4. Jika key belum terikat, server mengikatnya ke perangkat.
 5. Jika key sudah terikat pada perangkat yang sama, server menerbitkan lease baru.
@@ -176,9 +176,10 @@ Nama host final mengikuti deployment pusat. Rute logis yang diperlukan:
 - `POST /v1/desktop/license/renew`: memperbarui lease saat lisensi masih aktif.
 - `POST /v1/desktop/usage/record`: mencatat file berhasil secara idempoten.
 
-Setiap permintaan desktop memuat `product_id`, versi aplikasi, identitas kunci
-perangkat, nonce, dan tanda tangan. Aktivasi juga memuat license key. Server
-tidak pernah mengirim rahasia Mayar ke desktop.
+Setiap permintaan desktop memuat product header, versi aplikasi, identitas
+perangkat, challenge sekali-pakai, dan tanda tangan. Aktivasi juga memuat
+license key; renewal tidak memuat raw key. Server tidak pernah mengirim
+rahasia Mayar ke desktop.
 
 Respons status minimal memuat status lisensi, tanggal berakhir langganan,
 tanggal berakhir lease, status binding, sisa trial per engine, alasan lock,

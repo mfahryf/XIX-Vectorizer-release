@@ -5,9 +5,12 @@ use crate::licensing::{
 };
 use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
-use ed25519_dalek::{Signer, SigningKey};
+use ed25519_dalek::{Signer, Verifier, SigningKey};
 use rand_core::OsRng;
 use serde_json::json;
+use std::io::{Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::thread;
 
 #[test]
 fn trial_uses_real_engine_ids_and_locks_only_exhausted_engine() {
@@ -48,6 +51,19 @@ fn preflight_locks_only_when_requested_files_exceed_engine_quota() {
 }
 
 #[test]
+fn trial_status_merge_does_not_restore_unsynced_local_successes() {
+    let mut trial = TrialState::new(["vectorize-v1"]);
+    assert!(trial.record_success("vectorize-v1", "local-success"));
+
+    let server_snapshot = [("vectorize-v1".to_string(), 5_u8)]
+        .into_iter()
+        .collect();
+    trial.merge_remaining_by_engine(&server_snapshot);
+
+    assert_eq!(trial.remaining("vectorize-v1"), 4);
+}
+
+#[test]
 fn lease_validation_rejects_expired_or_mismatched_payload() {
     let lease = LeasePayload {
         product_id: "xix-vectorizer".into(),
@@ -75,6 +91,155 @@ fn canonical_request_signature_changes_when_payload_changes() {
     assert_ne!(first.signature, second.signature);
     assert_ne!(first.signature, changed_payload.signature);
     assert_eq!(first.public_key, identity.public_key_base64());
+}
+
+#[test]
+fn signed_payload_canonicalization_sorts_nested_objects_recursively() {
+    let value = json!({
+        "z": {"b": 1, "a": [{"d": 4, "c": 3}]},
+        "a": 2
+    });
+
+    assert_eq!(
+        crate::licensing::canonical_json(&value).unwrap(),
+        br#"{"a":2,"z":{"a":[{"c":3,"d":4}],"b":1}}"#
+    );
+}
+
+#[test]
+fn challenge_signature_covers_sorted_device_id_and_challenge_only() {
+    let identity = DeviceIdentity::generate().expect("identity generation");
+    let signature = identity.sign_challenge("challenge-123");
+    let signature = BASE64.decode(signature).expect("base64 signature");
+    let signature = ed25519_dalek::Signature::from_slice(&signature).unwrap();
+    let message = crate::licensing::canonical_json(&json!({
+        "device_id": identity.registration_id(),
+        "challenge": "challenge-123"
+    }))
+    .unwrap();
+
+    ed25519_dalek::Verifier::verify(&identity.verifying_key(), &message, &signature).unwrap();
+}
+
+#[tokio::test]
+async fn claim_uses_device_challenge_and_flat_signed_request_body() {
+    let identity = DeviceIdentity::generate().expect("identity generation");
+    let gateway_key = SigningKey::generate(&mut OsRng);
+    let gateway_public_key = BASE64.encode(gateway_key.verifying_key().to_bytes());
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let expected_identity = identity.clone();
+    let server = thread::spawn(move || {
+        let (mut challenge_stream, _) = listener.accept().unwrap();
+        let (path, body) = read_json_request(&mut challenge_stream);
+        assert_eq!(path, "/v1/desktop/device/challenge");
+        assert_eq!(body["device_id"], expected_identity.registration_id());
+        assert_eq!(body["public_key"], expected_identity.public_key_base64());
+        assert_eq!(body["public_key_fingerprint"], expected_identity.fingerprint());
+        assert_eq!(body["platform"], std::env::consts::OS);
+        assert_eq!(body["app_version"], "0.1.0");
+        write_json_response(&mut challenge_stream, &json!({
+            "challenge": "fresh-challenge",
+            "expires_at": 1_800_000_000_i64
+        }));
+
+        let (mut claim_stream, _) = listener.accept().unwrap();
+        let (path, body) = read_json_request(&mut claim_stream);
+        assert_eq!(path, "/v1/desktop/trial/claim");
+        let object = body.as_object().unwrap();
+        assert_eq!(object.len(), 7);
+        assert!(object.get("license_key").is_none());
+        assert_eq!(body["challenge"], "fresh-challenge");
+        let signature = BASE64.decode(body["signature"].as_str().unwrap()).unwrap();
+        let signature = ed25519_dalek::Signature::from_slice(&signature).unwrap();
+        let signed = canonical_json(&json!({
+            "device_id": expected_identity.registration_id(),
+            "challenge": "fresh-challenge"
+        }))
+        .unwrap();
+        expected_identity
+            .verifying_key()
+            .verify(&signed, &signature)
+            .unwrap();
+
+        let payload = json!({
+            "product_id": "xix-vectorizer",
+            "device_id": expected_identity.registration_id(),
+            "trial_remaining_by_engine": {
+                "vectorize-v1": 5,
+                "vectorize-v2": 5,
+                "pngtosvg": 5
+            },
+            "key_id": "gateway-test"
+        });
+        let signature = gateway_key.sign(&canonical_trial_token_bytes(&payload));
+        write_json_response(&mut claim_stream, &json!({
+            "license_state": "trial",
+            "device_state": "registered",
+            "trial_remaining_by_engine": {
+                "vectorize-v1": 5,
+                "vectorize-v2": 5,
+                "pngtosvg": 5
+            },
+            "server_time": 1_700_000_000_i64,
+            "trial_token": {
+                "payload": payload,
+                "key_id": "gateway-test",
+                "signature": BASE64.encode(signature.to_bytes())
+            }
+        }));
+    });
+
+    let client = LicenseClient::new(
+        format!("http://{address}"),
+        Some(&gateway_public_key),
+    )
+    .unwrap();
+    let response = client.claim_trial(&identity, "0.1.0").await.unwrap();
+    assert_eq!(response.status.license_state.as_deref(), Some("trial"));
+    assert!(response.trial_token.is_some());
+    server.join().unwrap();
+}
+
+fn read_json_request(stream: &mut TcpStream) -> (String, serde_json::Value) {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 4096];
+    let header_end;
+    loop {
+        let read = stream.read(&mut buffer).unwrap();
+        assert!(read > 0, "client closed request before headers");
+        bytes.extend_from_slice(&buffer[..read]);
+        if let Some(index) = bytes.windows(4).position(|window| window == b"\r\n\r\n") {
+            header_end = index + 4;
+            break;
+        }
+    }
+    let headers = String::from_utf8_lossy(&bytes[..header_end]).into_owned();
+    let content_length = headers
+        .lines()
+        .find_map(|line| line.strip_prefix("content-length:").or_else(|| line.strip_prefix("Content-Length:")))
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .unwrap_or(0);
+    while bytes.len() < header_end + content_length {
+        let read = stream.read(&mut buffer).unwrap();
+        assert!(read > 0, "client closed request before body");
+        bytes.extend_from_slice(&buffer[..read]);
+    }
+    let request_line = headers.lines().next().unwrap();
+    let path = request_line.split_whitespace().nth(1).unwrap().to_string();
+    let body = serde_json::from_slice(&bytes[header_end..header_end + content_length]).unwrap();
+    (path, body)
+}
+
+fn write_json_response(stream: &mut TcpStream, value: &serde_json::Value) {
+    let body = serde_json::to_vec(value).unwrap();
+    write!(
+        stream,
+        "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len()
+    )
+    .unwrap();
+    stream.write_all(&body).unwrap();
 }
 
 #[test]
