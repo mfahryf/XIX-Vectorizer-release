@@ -22,7 +22,7 @@ dipulihkan admin saat pengguna mengganti perangkat atau kehilangan data lokal.
 - Penggantian perangkat dilakukan melalui reset device binding oleh admin.
 - Trial dimulai otomatis saat file pertama diproses.
 - Setiap engine memiliki trial lima file berhasil secara terpisah: `vectorize-v1`,
-  `vectorize-v2`, dan `vectorize-v3`.
+  `vectorize-v2`, dan `pngtosvg` (nama tampilan: Vectorize V3).
 - Setelah satu engine mencapai lima file, hanya engine itu yang terkunci.
 - Setelah semua engine menghabiskan trial, seluruh pemrosesan memerlukan lisensi.
 - Lease lokal berlaku maksimal 14 hari sejak validasi terakhir.
