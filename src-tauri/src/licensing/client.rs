@@ -386,16 +386,36 @@ async fn response_value(response: reqwest::Response) -> Result<Value, LicenseErr
             StatusCode::TOO_MANY_REQUESTS => {
                 LicenseError::Network("permintaan terlalu sering".into())
             }
-            _ => LicenseError::Network(
-                value
-                    .get("message")
-                    .and_then(Value::as_str)
-                    .unwrap_or("server error")
-                    .into(),
-            ),
+            _ => LicenseError::Network(response_error_message(&value)),
         });
     }
     Ok(value)
+}
+
+fn response_error_message(value: &Value) -> String {
+    if let Some(message) = value.get("message").and_then(Value::as_str) {
+        return message.into();
+    }
+
+    let Some(detail) = value.get("detail") else {
+        return "server error".into();
+    };
+
+    if let Some(message) = detail.get("message").and_then(Value::as_str) {
+        return message.into();
+    }
+    if let Some(message) = detail.as_str() {
+        return message.into();
+    }
+    if let Some(message) = detail.as_array().and_then(|items| {
+        items
+            .iter()
+            .find_map(|item| item.get("msg").and_then(Value::as_str))
+    }) {
+        return message.into();
+    }
+
+    "server error".into()
 }
 
 /// Canonical JSON for signatures. Object keys are sorted at every nesting
@@ -512,10 +532,49 @@ where
 #[cfg(test)]
 mod tests {
     use super::LicenseClient;
+    use crate::licensing::error::LicenseError;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
+    use std::thread;
 
     #[test]
     fn production_client_has_a_pinned_gateway_public_key() {
         let client = LicenseClient::production().expect("production client should be valid");
         assert!(client.gateway_public_key.is_some());
+    }
+
+    #[tokio::test]
+    async fn structured_gateway_error_exposes_detail_message() {
+        crate::net::http::ensure_crypto_provider();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test request");
+            let mut request = [0_u8; 4096];
+            stream.read(&mut request).expect("read test request");
+            let body = br#"{"detail":{"code":"provider_error","message":"Mayar rejected software license verification (HTTP 404)"}}"#;
+            write!(
+                stream,
+                "HTTP/1.1 404 Not Found\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("write test headers");
+            stream.write_all(body).expect("write test body");
+        });
+
+        let response = reqwest::Client::new()
+            .get(format!("http://{address}/error"))
+            .send()
+            .await
+            .expect("request test server");
+        let error = super::response_value(response).await.unwrap_err();
+
+        assert_eq!(
+            error,
+            LicenseError::Network(
+                "Mayar rejected software license verification (HTTP 404)".into()
+            )
+        );
+        server.join().expect("test server join");
     }
 }
