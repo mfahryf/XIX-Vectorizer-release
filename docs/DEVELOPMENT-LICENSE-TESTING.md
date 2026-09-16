@@ -49,7 +49,10 @@ Hapus override setelah selesai agar pengujian kembali memakai key yang dipin.
 ## Matriks uji manual
 
 Gunakan satu akun sandbox dan produk Software License Mayar
-`f3e0891b-0d54-42dd-b89d-44767e5dd31e`.
+`c0bf5eb7-2cb2-4caf-9768-51f07dd54b22` pada akun sandbox, dengan
+checkout `https://xixlabs.myr.lat/pl/xix-vectorizer-monthly-license`. Pasangan ini
+dibaca dari katalog gateway lewat console admin dan berubah bersama saat cutover
+ke production, jadi jangan disalin ke dokumen lain.
 
 | Skenario | Hasil yang diharapkan |
 | --- | --- |

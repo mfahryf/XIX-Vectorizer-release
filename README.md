@@ -34,7 +34,7 @@ lainnya.
 
 ### Aktivasi dan perangkat
 
-1. Selesaikan pembayaran bulanan melalui [checkout Software License Mayar](https://xixlabs.myr.wtf/pl/xix-vectorizer-monthly-license-92882).
+1. Selesaikan pembayaran bulanan melalui checkout Software License Mayar yang tercantum di bagian pilot dokumen ini.
 2. Salin kode lisensi yang ditampilkan atau dikirim melalui email Mayar.
 3. Buka panel `LICENSE`, masukkan key, lalu pilih `ACTIVATE`.
 4. Satu lisensi hanya memiliki satu device binding aktif di gateway XIXLabs.
@@ -103,17 +103,19 @@ Aturan tampilan desktop lintas aplikasi XIXLabs ada di
 - [ ] Online setelah expired memperbarui lease bila langganan masih aktif.
 - [ ] Menghapus cache lease meminta validasi online pada device yang sama.
 - [ ] Kehilangan identitas device menampilkan state recovery.
-     database lokal yang ikut Git.
+- [ ] Tidak ada secret produksi, cache lease, identitas device, ledger, atau
+      database lokal yang ikut Git.
+
 Kode lisensi yang dimasukkan adalah `licenseCode` dari Mayar, bukan key yang
 dibuat gateway. Gateway memisahkan status provider Mayar dari status langganan
 bulanan XIXLabs; status provider dapat tetap aktif ketika akses bulanan sudah
 berakhir.
 
-Tidak ada secret produksi, cache lease, identitas device, ledger, atau
-database lokal yang ikut Git.
-
-Untuk pilot, gunakan product Software License Mayar dengan UUID
-`f3e0891b-0d54-42dd-b89d-44767e5dd31e` dan checkout yang tercantum di atas.
-Lakukan satu transaksi test, ambil kode dari halaman/email Mayar, lalu aktivasi
-pada satu komputer. Jangan memakai secret produksi di test lokal atau
-repository.
+Untuk pilot, pakai pasangan yang sedang aktif di katalog gateway: Mayar product
+ID `c0bf5eb7-2cb2-4caf-9768-51f07dd54b22` dengan checkout
+`https://xixlabs.myr.lat/pl/xix-vectorizer-monthly-license`. Pasangan itu milik akun
+sandbox, dan katalog gateway adalah sumber kebenarannya, bukan halaman ini. Saat
+pindah ke production, ganti Mayar product ID dan checkout bersamaan mengikuti
+panduan di `XIX-Payment-Gateway/docs/PRODUCTION-CUTOVER.md`. Lakukan satu
+transaksi test, ambil kode dari halaman/email Mayar, lalu aktivasi pada satu
+komputer. Jangan memakai secret produksi di test lokal atau repository.
