@@ -190,3 +190,34 @@ aplikasi dan gateway:
    offline, expiry, device conflict, dan reset HWID.
 8. Jalankan checklist QA sebelum repository dan konfigurasi production dinyatakan
    siap.
+
+## 8. Kegagalan yang sudah pernah terjadi
+
+Bagian ini mencatat kejadian nyata pada integrasi XIX-Vectorizer supaya tidak
+terulang, dan supaya aplikasi desktop berikutnya mengenali gejalanya lebih
+cepat. Padanan untuk aplikasi web ada di
+`XIX-AnimotionV2/docs/WEB-APP-INTEGRATION-STANDARD.md`.
+
+| Gejala di aplikasi | Penyebab | Penanganan |
+| --- | --- | --- |
+| `Mayar license code is not active` | Kode ada, tetapi statusnya di Mayar bukan aktif untuk produk yang dicek | Cocokkan UUID produk di katalog dengan produk tempat kode itu diterbitkan |
+| `Mayar software license product ID mismatch` | Katalog aplikasi menunjuk produk Mayar yang berbeda dari produk penerbit kode | Samakan `mayar_product_id` di katalog dengan produk yang benar-benar dipakai checkout |
+| `There's no license with code ... and product id ... registered in user ...` | Kode diterbitkan akun atau produk lain daripada yang dicek gateway | Gunakan pasangan akun, kunci, dan UUID produk yang berasal dari satu lingkungan yang sama |
+| `invalid_license` | Kode tidak dikenal untuk produk tersebut, atau sudah tidak berlaku menurut provider | Periksa status kode di dasbor Mayar, lalu katalog gateway |
+| `device_conflict` | Kode sudah terikat ke perangkat lain | Reset perangkat lewat admin; aplikasi tidak boleh membuat binding kedua sendiri |
+| `subscription_expired` padahal status provider masih aktif | Status provider dan langganan bulanan XIXLabs adalah dua hal berbeda | Perpanjang langganan lewat pembayaran; status provider tidak memperpanjang hak bulanan |
+| `license_revoked` | Lisensi dicabut oleh admin | Hubungi admin; aplikasi menampilkan alasan dan langkah pemulihan |
+| `jam perangkat mundur dari waktu server tepercaya` | Jam perangkat berada di belakang waktu server terakhir yang pernah dicatat aplikasi | Sinkronkan jam Windows, lalu jalankan validasi online |
+| `layanan lisensi tidak tersedia: server error` | Gateway atau provider sedang gagal sementara | Bukan masalah lisensi pengguna; coba lagi, dan lease yang masih berlaku tetap dapat dipakai offline |
+| Kode lisensi selamanya berstatus sedang diproses di halaman Mayar | Mayar belum menerbitkan kode untuk transaksi itu | Periksa transaksi di dasbor Mayar; ini bukan kegagalan aplikasi |
+
+### Catatan waktu perangkat
+
+Aplikasi menyimpan waktu server terakhir yang dipercaya, dan menolak jam yang
+berada di belakang nilai itu. Pemulihan online hanya menerima selisih paling
+besar lima menit antara jam perangkat dan jam server.
+
+Konsekuensinya, jam yang tampak benar belum tentu cukup: bila jam perangkat
+berada lebih dari lima menit di belakang jam server, menyambung ke internet
+sendiri tidak memperbaiki keadaan. Sinkronkan jam perangkat lebih dulu, baru
+jalankan validasi ulang.
