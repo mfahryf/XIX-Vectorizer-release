@@ -1,18 +1,18 @@
-// Image-type detection ported from pngtosvg.com's `kh()` (found in their
-// bundle): analyze the RGBA image and classify it as sketch / logo / photo,
-// which determines the target color count the way the website does.
+// Image-type detection for the V3 engine: analyze the RGBA image and
+// classify it as sketch / logo / photo, which determines the target color
+// count.
 //
 //   sketch     → 3 colors   (line art, two tones)
 //   logo       → 8 colors   (flat colors, crisp edges)
 //   photo      → 24 colors  (many colors, soft gradients)
 //
-// Heuristics (from the site):
+// Heuristics:
 //   c  = average chroma of non-dominant pixels
 //   g  = flatness — fraction of neighbouring pixels that are near-identical
 //   y  = bins90 — how many quantized colors cover the first 90% of pixels
-// The site picks sketch when (c < 12 && g > 0.5), logo when (y <= 48 &&
-// g > 0.55), otherwise photo. Worker still optimizes the final palette below
-// the target, so these are upper bounds, matching web behavior.
+// sketch is chosen when (c < 12 && g > 0.5) and logo when (y <= 48 &&
+// g > 0.55), otherwise photo. The worker still optimizes the final palette
+// below the target, so these are upper bounds.
 
 /**
  * @param {{data: Uint8ClampedArray, width: number, height: number}} image

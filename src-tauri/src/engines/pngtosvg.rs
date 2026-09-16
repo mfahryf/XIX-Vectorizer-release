@@ -1,12 +1,12 @@
-//! The PngToSvg engine — offline image-to-SVG using pngtosvg.com's own
-//! algorithm, ported to run under a bundled portable Node.
+//! The PngToSvg engine — offline image-to-SVG, the highest-quality vector
+//! engine in XIX-Vectorizer. It runs under a bundled portable Node so the
+//! app stays self-contained and needs no network at all.
 //!
-//! pngtosvg.com has no server API: its conversion runs client-side in a web
-//! worker. We vendored that worker (`pngtosvg-runtime/worker.js`, pure JS,
-//! no DOM) plus a small runner that decodes the image (pngjs/jpeg-js in
-//! `pngtosvg-runtime/lib`) and feeds the worker's `Qn(image, settings)`
-//! entry point. The engine shells out to the bundled `node.exe` (same
-//! pattern as the SVG Converter → Inkscape):
+//! The conversion core lives in `pngtosvg-runtime/worker.js` (pure JS, no
+//! DOM). A small runner decodes the image (pngjs/jpeg-js in
+//! `pngtosvg-runtime/lib`) and feeds the core's `Qn(image, settings)` entry
+//! point. The engine shells out to the bundled `node.exe` (same pattern as
+//! the SVG Converter → Inkscape):
 //!
 //!   `node.exe runner.js <input> <raw.svg> <max-dim> <colors>`
 //!

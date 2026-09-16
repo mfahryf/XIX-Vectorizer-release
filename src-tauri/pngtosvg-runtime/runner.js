@@ -18,7 +18,7 @@ const { detectImageType } = require(path.join(__dirname, 'detect.js'));
 
 const [, , inPath, outPath, maxDimArg, colorsArg] = process.argv;
 const MAX_DIM = parseInt(maxDimArg || '2000', 10) || 2000;
-// 0 (or missing) = auto-detect image type (sketch/logo/photo) like the website
+// 0 (or missing) = auto-detect image type (sketch/logo/photo)
 const COLORS_ARG = parseInt(colorsArg || '0', 10);
 const COLORS = Number.isFinite(COLORS_ARG) && COLORS_ARG > 0 ? COLORS_ARG : 0;
 
