@@ -1,16 +1,18 @@
 {
   "name": "xix-vectorizer",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "scripts": {
     "dev": "tauri dev",
     "build": "tauri build",
-    "test:ui": "node --test licensing-ui.test.js license-modal-structure.test.js desktop-branding-structure.test.js engine-ui.test.js"
+    "test:ui": "node --test licensing-ui.test.js license-modal-structure.test.js desktop-branding-structure.test.js engine-ui.test.js updater-structure.test.js"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2"
   },
   "dependencies": {
-    "@tauri-apps/plugin-opener": "^2.5.5"
+    "@tauri-apps/plugin-opener": "^2.5.5",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0"
   }
 }

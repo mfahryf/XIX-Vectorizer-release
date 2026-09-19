@@ -137,7 +137,9 @@ impl LicenseManager {
                     if clock_rollback
                         && refreshed
                             .last_server_time
-                            .is_some_and(|server_time| !clock_is_trusted(server_time, unix_now()))
+                            .is_some_and(|server_time| {
+                                !online_clock_recovery_is_trusted(unix_now(), server_time)
+                            })
                     {
                         return Ok(clock_rollback_status());
                     }
@@ -391,9 +393,7 @@ impl LicenseManager {
                 .merge_remaining_by_engine(&response.trial_remaining_by_engine);
         }
         if let Some(lease) = response.lease {
-            self.ensure_server_time_is_monotonic(&state, lease.server_time)?;
             state.lease_verified = true;
-            state.last_server_time = Some(lease.server_time);
             state.lease = Some(lease);
         }
         self.store.save(&state)
@@ -477,6 +477,10 @@ pub fn clock_recovery_is_trusted(local_now: i64, server_time: i64) -> bool {
     const MAX_CLOCK_SKEW_SECONDS: i64 = 300;
     server_time >= local_now.saturating_sub(MAX_CLOCK_SKEW_SECONDS)
         && server_time <= local_now.saturating_add(MAX_CLOCK_SKEW_SECONDS)
+}
+
+fn online_clock_recovery_is_trusted(local_now: i64, server_time: i64) -> bool {
+    clock_recovery_is_trusted(local_now, server_time)
 }
 
 fn clock_rollback_status() -> Status {

@@ -56,11 +56,14 @@
     } else if (state === "clock-rollback") {
       badge = "CLOCK CHECK";
       message = "Waktu perangkat mundur. Periksa jam lalu validasi lisensi.";
+    } else if (state === "unavailable") {
+      badge = "UNAVAILABLE";
+      message = "Status lisensi sementara tidak tersedia.";
     }
     return {
       canProcess,
       canStart,
-      showActivation: !licensed,
+      showActivation: state !== "unavailable" && !licensed,
       badge,
       message,
       engineCounters,

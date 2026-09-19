@@ -61,9 +61,47 @@ async function loadLicenseStatus() {
       await refreshLicense(false);
     }
   } catch (error) {
+    if (state.license && ["licensed", "licensed-offline"].includes(state.license.license_state)) {
+      $("license-status").textContent = "Status lisensi sementara tidak tersedia.";
+      console.warn("license status temporarily unavailable", error);
+      return;
+    }
     renderLicenseStatus({ license_state: "unavailable", trial_remaining_by_engine: {} });
-    $("license-status").textContent = "Status lisensi belum dapat diperiksa.";
+    $("license-status").textContent = "Status lisensi sementara tidak tersedia.";
     console.warn("license status unavailable", error);
+  }
+}
+async function checkForUpdates() {
+  const tauri = window.__TAURI__;
+  if ((!tauri?.updater?.check && !tauri?.core?.invoke) || state.running) return;
+  try {
+    const update = tauri.updater?.check
+      ? await tauri.updater.check()
+      : await tauri.core.invoke("plugin:updater|check");
+    if (!update || !update.rid || !update.version) return;
+    const accepted = window.confirm(
+      `A new Vectorizer update (${update.version}) is available. Download and install it now?`,
+    );
+    if (!accepted) return;
+    setStatus(`UPDATING TO ${update.version}`, false);
+    if (typeof update.downloadAndInstall === "function") {
+      await update.downloadAndInstall();
+    } else {
+      const channel = tauri.core.Channel ? new tauri.core.Channel() : null;
+      if (!channel) return;
+      await tauri.core.invoke("plugin:updater|download_and_install", {
+        onEvent: channel,
+        rid: update.rid,
+        restartAfterInstall: true,
+      });
+    }
+    if (tauri.process?.relaunch) {
+      await tauri.process.relaunch();
+    } else {
+      await tauri.core.invoke("plugin:process|restart");
+    }
+  } catch (error) {
+    console.warn("update check unavailable", error);
   }
 }
 async function refreshLicense(showMessage = true) {
@@ -1081,4 +1119,5 @@ listen("batch://done", (e) => {
   setRunState("idle");
   setSeek(0);
   await loadLicenseStatus();
+  void checkForUpdates();
 })();

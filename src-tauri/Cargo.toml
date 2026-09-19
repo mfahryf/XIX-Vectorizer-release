@@ -1,6 +1,6 @@
 [package]
 name = "xix-vectorizer"
-version = "0.1.0"
+version = "0.1.1"
 description = "XIX-Vectorizer - Winamp-themed batch vectorizer"
 edition = "2021"
 
@@ -15,6 +15,8 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
 tauri-plugin-opener = "2"
+tauri-plugin-process = "2.2"
+tauri-plugin-updater = "2.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls-no-provider", "rustls-tls-webpki-roots-no-provider", "stream", "json", "multipart", "socks"] }

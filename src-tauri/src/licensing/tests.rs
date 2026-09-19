@@ -345,6 +345,52 @@ fn local_license_state_roundtrips_without_raw_license_key() {
     assert!(!raw.contains("private_key"));
 }
 
+#[test]
+fn protected_store_recovers_from_valid_backup_when_primary_is_missing() {
+    let dir = tempfile_dir("state-backup-recovery");
+    let store = LicenseStore::new(&dir);
+    let mut state = LocalLicenseState::default();
+    state.server_license_state = Some("active".into());
+    state.last_server_time = Some(1_700_000_000);
+    store.save(&state).unwrap();
+
+    let primary = store.path();
+    let backup = primary.with_file_name("license-cache.lease.bak");
+    std::fs::copy(&primary, &backup).unwrap();
+    std::fs::remove_file(&primary).unwrap();
+
+    assert_eq!(store.load().unwrap(), state);
+}
+
+#[test]
+fn current_status_time_is_not_replaced_by_historical_lease_time() {
+    let dir = tempfile_dir("clock-lease-watermark");
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+    let now = crate::licensing::usage::unix_now();
+    let old_lease_time = now - 600;
+    let response = crate::licensing::GatewayStatus {
+        license_state: Some("active".into()),
+        device_state: Some("registered".into()),
+        server_time: Some(now),
+        lease: Some(LeasePayload {
+            product_id: "xix-vectorizer".into(),
+            device_fingerprint: "device-a".into(),
+            license_state: "active".into(),
+            subscription_expires_at: now + 86_400,
+            lease_expires_at: now + 3_600,
+            issued_at: old_lease_time,
+            server_time: old_lease_time,
+            key_id: "gateway-2026-01".into(),
+            signature: "test-signature".into(),
+        }),
+        ..Default::default()
+    };
+
+    manager.store_gateway_status(response).unwrap();
+    assert_eq!(manager.state.lock().last_server_time, Some(now));
+}
+
 #[tokio::test]
 async fn fresh_manager_reports_trial_without_network_call() {
     let dir = tempfile_dir("manager");
@@ -490,6 +536,12 @@ fn online_clock_recovery_accepts_a_current_server_after_a_stale_future_cache() {
     assert!(crate::licensing::clock_recovery_is_trusted(2_000, 1_999));
     assert!(!crate::licensing::clock_recovery_is_trusted(1_000, 2_000));
     assert!(!crate::licensing::clock_recovery_is_trusted(2_000, 2_400));
+}
+
+#[test]
+fn online_refresh_accepts_small_server_clock_skew_after_startup_rollback() {
+    assert!(super::online_clock_recovery_is_trusted(2_000, 2_001));
+    assert!(!super::online_clock_recovery_is_trusted(2_000, 2_301));
 }
 
 #[test]

@@ -75,3 +75,11 @@ test("clock rollback is shown as a local validation problem", () => {
   assert.equal(view.badge, "CLOCK CHECK");
   assert.match(view.message, /waktu perangkat/i);
 });
+
+test("temporarily unavailable status does not look like a fresh unactivated install", () => {
+  const view = deriveLicenseView({ license_state: "unavailable" });
+  assert.equal(view.canProcess, false);
+  assert.equal(view.canStart, false);
+  assert.equal(view.showActivation, false);
+  assert.equal(view.badge, "UNAVAILABLE");
+});

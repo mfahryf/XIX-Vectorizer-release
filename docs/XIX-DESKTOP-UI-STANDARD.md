@@ -190,6 +190,12 @@ aplikasi dan gateway:
    offline, expiry, device conflict, dan reset HWID.
 8. Jalankan checklist QA sebelum repository dan konfigurasi production dinyatakan
    siap.
+9. Bila aplikasi ini akan punya halaman publik, sediakan pratinjau jendela pada
+   bagian unduhan halaman tersebut. Pratinjau disalin dari aplikasi, bukan
+   digambar ulang dengan perkiraan: ukuran jendela, warna, tinggi bilah, dan
+   tulisan setiap sel diambil dari berkas aplikasi. Rinciannya di
+   `XIX-Vectorizer-web/docs/DESKTOP-WEB-PAGE-STANDARD.md` bagian Pratinjau
+   aplikasi desktop.
 
 ## 8. Kegagalan yang sudah pernah terjadi
 

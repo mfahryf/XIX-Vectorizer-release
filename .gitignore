@@ -6,3 +6,4 @@ src-tauri/gen/schemas/
 device-identity*
 license-cache*
 usage-ledger*
+.signing-staging/
