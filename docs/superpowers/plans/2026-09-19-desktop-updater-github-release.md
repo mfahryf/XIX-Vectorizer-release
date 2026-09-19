@@ -112,7 +112,7 @@
 
 - [ ] **Step 2: Add signed release workflow.**
 
-  Trigger on `workflow_dispatch` and pushes to the `release` branch. Grant only `contents: write`. Run `npm ci`, Rust setup/cache, the Rust and UI tests, then `tauri-apps/tauri-action@v1` with `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`, `GITHUB_TOKEN`, `tagName: desktop-v__VERSION__`, and `releaseDraft: true`.
+  Trigger on `workflow_dispatch` and version tags. Grant only `contents: write`. Run `npm ci`, Rust setup/cache, then `tauri-apps/tauri-action@v1` with the signing secrets and `GITHUB_TOKEN`. After publishing, upload a copy of the installer as `Vectorizer-latest-x64-setup.exe` so the public web page can link directly to the newest installer without embedding a version number.
 
 - [ ] **Step 3: Produce the first updater-compatible release.**
 
@@ -120,7 +120,7 @@
 
 - [ ] **Step 4: Verify updater metadata independently.**
 
-  Fetch `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json` and verify that the Windows x64 entry contains a versioned installer URL and a non-empty signature. Do not install it on the currently running app until the license persistence test is complete.
+  Fetch `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json` and verify that the Windows x64 entry contains a versioned installer URL and a non-empty signature. Also verify that `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe` returns the installer directly. Do not install it on the currently running app until the license persistence test is complete.
 
 ### Task 4: Update documentation and repository registry
 

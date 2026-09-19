@@ -41,3 +41,16 @@ jobs:
           releaseBody: Signed Windows installer and updater metadata for XIX Vectorizer.
           releaseDraft: false
           prerelease: false
+
+      - name: Publish stable installer download alias
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $installer = Get-ChildItem "src-tauri/target/release/bundle/nsis/*-setup.exe" | Select-Object -First 1
+          if (-not $installer) {
+            throw "The signed Windows installer was not found."
+          }
+          $stable = Join-Path $installer.DirectoryName "Vectorizer-latest-x64-setup.exe"
+          Copy-Item -LiteralPath $installer.FullName -Destination $stable -Force
+          gh release upload "${{ github.ref_name }}" $stable --repo "${{ github.repository }}" --clobber
