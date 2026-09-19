@@ -144,6 +144,39 @@ aplikasi dan gateway:
 | Gateway URL | `https://payment.xixlabs.net` | Desktop tidak menghubungi Mayar langsung |
 | Redirect checkout | URL HTTPS yang di-allowlist | Tidak boleh URL lokal pada production |
 
+### Release, updater, dan installer publik
+
+Setiap aplikasi desktop yang didistribusikan ke pengguna harus memiliki alur
+rilis yang dapat diulang dan tidak bergantung pada komputer developer:
+
+- Source boleh tetap berada di repository private, tetapi repository release
+  harus public agar updater dan halaman aplikasi dapat mengambil asset tanpa
+  login GitHub. Gunakan pola nama `<owner>/XIX-<App>-release`.
+- GitHub Actions berjalan pada push tag versi `v*`, membangun installer Windows
+  yang ditandatangani, lalu menerbitkan tiga hal: installer versioned,
+  `.sig`, dan `latest.json`.
+- Workflow juga mengunggah salinan installer dengan nama stabil
+  `<App>-latest-x64-setup.exe`. Halaman aplikasi harus menunjuk ke:
+  `https://github.com/<owner>/XIX-<App>-release/releases/latest/download/<App>-latest-x64-setup.exe`.
+  Jangan menanam nomor versi di tombol download.
+- Aplikasi Tauri menyimpan public signing key di konfigurasi, memakai endpoint
+  `releases/latest/download/latest.json`, dan menyimpan private signing key
+  hanya di GitHub Actions secret. Nama secret boleh terdokumentasi, nilainya
+  tidak boleh.
+- Saat startup, aplikasi memeriksa release terbaru. Jika ada, tampilkan
+  pemberitahuan yang meminta persetujuan pengguna sebelum mengunduh dan
+  memasang update. Jangan memasang update saat batch sedang berjalan; setelah
+  pemasangan, aplikasi boleh restart otomatis.
+- Versi pada manifest JavaScript, Cargo, konfigurasi Tauri, tag Git, dan nama
+  release harus sama. Release pertama wajib diuji dari link direct installer,
+  bukan hanya dari halaman release.
+
+Untuk Vectorizer, repository release adalah
+`mfahryf/XIX-Vectorizer-release`, metadata updater berada di
+`https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json`,
+dan link installer stabilnya adalah
+`https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe`.
+
 ## 6. Checklist QA sebelum rilis
 
 ### Visual dan interaksi
@@ -173,10 +206,19 @@ aplikasi dan gateway:
 ### Build
 
 - [ ] `npm run test:ui` lulus.
+- [ ] `cargo test --manifest-path src-tauri/Cargo.toml` lulus.
 - [ ] `git diff --check` bersih.
 - [ ] `npm run build` menghasilkan executable dan installer target.
 - [ ] Installer diuji pada build bersih atau mesin yang cache ikonnya sudah
       diperbarui.
+- [ ] Repository release public, tag versi sudah dipush, dan GitHub Actions
+      selesai tanpa error.
+- [ ] `latest.json` dapat diakses tanpa login dan berisi URL installer serta
+      signature yang tidak kosong.
+- [ ] Link direct installer stabil mengembalikan status `200` dan mengunduh
+      file Windows yang benar.
+- [ ] Membuka aplikasi dengan release baru menampilkan pemberitahuan update;
+      menolak pemberitahuan tidak merusak pemrosesan.
 
 ## 7. Checklist integrasi aplikasi baru
 
@@ -196,6 +238,14 @@ aplikasi dan gateway:
    tulisan setiap sel diambil dari berkas aplikasi. Rinciannya di
    `XIX-Vectorizer-web/docs/DESKTOP-WEB-PAGE-STANDARD.md` bagian Pratinjau
    aplikasi desktop.
+10. Buat workflow release dengan signing key di GitHub Actions, public
+    repository release, `latest.json`, signature, dan stable installer alias.
+11. Hubungkan tombol download halaman publik ke stable installer alias; simpan
+    override staging hanya sebagai environment variable.
+12. Uji update dari satu release ke release berikutnya, termasuk notifikasi,
+    persetujuan pengguna, pembatalan, restart, dan kondisi batch sedang aktif.
+13. Uji tutup-buka aplikasi dan mulai batch kedua. State lisensi, identitas
+    perangkat, counter trial, dan lease yang masih berlaku harus tetap ada.
 
 ## 8. Kegagalan yang sudah pernah terjadi
 
@@ -213,6 +263,10 @@ cepat. Padanan untuk aplikasi web ada di
 | `device_conflict` | Kode sudah terikat ke perangkat lain | Reset perangkat lewat admin; aplikasi tidak boleh membuat binding kedua sendiri |
 | `subscription_expired` padahal status provider masih aktif | Status provider dan langganan bulanan XIXLabs adalah dua hal berbeda | Perpanjang langganan lewat pembayaran; status provider tidak memperpanjang hak bulanan |
 | `license_revoked` | Lisensi dicabut oleh admin | Hubungi admin; aplikasi menampilkan alasan dan langkah pemulihan |
+| Lisensi hilang setelah aplikasi dibuka kembali | State lokal hanya ditulis langsung atau cache rusak tanpa backup | Gunakan penyimpanan terlindungi dengan tulis atomik dan backup; uji tutup-buka pada perangkat yang sama |
+| Error jam muncul saat batch kedua setelah batch pertama selesai | Timestamp lease historis dipakai sebagai waktu server terkini | Hanya waktu server top-level dari respons status yang boleh memperbarui watermark waktu; timestamp lease hanya untuk validasi lease |
+| Tombol download berhenti di halaman release | Link memakai halaman release atau nama installer versioned | Publikasikan stable installer alias pada setiap release dan gunakan `releases/latest/download/<stable-name>` |
+| Update tersedia tetapi tidak terpasang | Public key, endpoint, asset, atau signature tidak cocok | Cocokkan public key dengan private signing secret, cek `latest.json`, dan uji installer direct sebelum publish |
 | `jam perangkat mundur dari waktu server tepercaya` | Jam perangkat berada di belakang waktu server terakhir yang pernah dicatat aplikasi | Sinkronkan jam Windows, lalu jalankan validasi online |
 | `layanan lisensi tidak tersedia: server error` | Gateway atau provider sedang gagal sementara | Bukan masalah lisensi pengguna; coba lagi, dan lease yang masih berlaku tetap dapat dipakai offline |
 | Kode lisensi selamanya berstatus sedang diproses di halaman Mayar | Mayar belum menerbitkan kode untuk transaksi itu | Periksa transaksi di dasbor Mayar; ini bukan kegagalan aplikasi |
@@ -222,6 +276,11 @@ cepat. Padanan untuk aplikasi web ada di
 Aplikasi menyimpan waktu server terakhir yang dipercaya, dan menolak jam yang
 berada di belakang nilai itu. Pemulihan online hanya menerima selisih paling
 besar lima menit antara jam perangkat dan jam server.
+
+Respons status dapat membawa lease yang diterbitkan pada waktu sebelumnya.
+Timestamp lease tersebut bukan waktu server saat ini dan tidak boleh menggantikan
+watermark `last_server_time`. Kesalahan ini dapat membuat batch pertama berhasil,
+tetapi batch berikutnya salah dianggap mengalami clock rollback.
 
 Konsekuensinya, jam yang tampak benar belum tentu cukup: bila jam perangkat
 berada lebih dari lima menit di belakang jam server, menyambung ke internet
