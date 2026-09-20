@@ -391,6 +391,15 @@ async fn license_status(state: State<'_, LicensingState>) -> Result<LicenseStatu
 }
 
 #[tauri::command]
+async fn license_purchase_url(state: State<'_, LicensingState>) -> Result<String, String> {
+    state
+        .manager
+        .checkout_url()
+        .await
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 async fn activate_license(
     state: State<'_, LicensingState>,
     license_key: String,
@@ -520,6 +529,7 @@ pub fn run() {
             get_config,
             save_config,
             license_status,
+            license_purchase_url,
             activate_license,
             refresh_license,
             license_preflight

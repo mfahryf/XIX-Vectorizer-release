@@ -66,6 +66,7 @@ Client desktop hanya berkomunikasi dengan `XIX-Payment-Gateway` melalui
 HTTPS. Endpoint yang digunakan:
 
 - `POST /v1/desktop/trial/claim`
+- `GET /v1/desktop/products/xix-vectorizer` untuk mengambil Checkout URL terbaru
 - `POST /v1/desktop/license/activate`
 - `GET /v1/desktop/license/status`
 - `POST /v1/desktop/license/renew`
@@ -113,8 +114,10 @@ berakhir.
 
 Untuk production, pasangan katalog yang digunakan adalah Mayar product ID
 `4dbd3607-ba4e-491f-8751-95739c7c35b5` dengan checkout
-`https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license`. Katalog gateway tetap
-menjadi sumber kebenaran; URL pada aplikasi hanya membuka halaman pembayaran.
+`https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license`. Katalog pada halaman
+Products di admin dan database gateway menjadi sumber kebenaran; desktop meminta
+`checkout_url` terbaru saat tombol `Get License` ditekan. URL production di
+binary hanya cadangan ketika gateway sedang tidak tersedia.
 Pengujian sandbox mengikuti panduan terpisah di
 `docs/DEVELOPMENT-LICENSE-TESTING.md`. Jangan memakai secret produksi di test
 lokal atau repository.

@@ -32,7 +32,8 @@ test("license modal exposes the trial limit and public purchase action", () => {
   assert.match(html, /id="license-activate"[^>]*>ACTIVATE<\/button>/);
   assert.match(script, /LICENSE_PURCHASE_URL/);
   assert.match(script, /const LICENSE_PURCHASE_URL = "https:\/\/xix-apps\.myr\.id\/pl\/xix-vectorizer-monthly-license";/);
-  assert.match(script, /openUrl\(LICENSE_PURCHASE_URL\)/);
+  assert.match(script, /invoke\("license_purchase_url"\)/);
+  assert.match(script, /openUrl\(await resolveLicensePurchaseUrl\(\)\)/);
   assert.match(script, /\$\("license-help"\)\.textContent = view\.canProcess[\s\S]*?view\.helpMessage/);
   assert.doesNotMatch(script, /Belum diaktifkan\./);
   assert.match(script, /focusable = \[[\s\S]*?\$\("license-buy"\)/);

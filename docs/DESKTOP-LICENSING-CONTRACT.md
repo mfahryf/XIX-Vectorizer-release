@@ -45,6 +45,11 @@ playlist, dan riwayat tidak boleh dihapus atau diubah karena state lisensi.
 6. Kurangi kuota hanya setelah file berhasil dan output tervalidasi.
 7. Sinkronkan event usage secara idempoten ketika online.
 
+Tombol `Get License` meminta `GET /v1/desktop/products/xix-vectorizer` ke
+gateway lalu membuka `checkout_url` yang dikembalikan katalog admin. Tidak ada
+token admin atau rahasia Mayar di desktop. Jika gateway sementara tidak dapat
+dihubungi, aplikasi memakai tautan production terakhir sebagai cadangan.
+
 Batch boleh berisi lebih banyak file daripada sisa trial, tetapi worker tidak
 boleh memulai file setelah izin terakhir dipakai. File gagal atau dibatalkan
 mengembalikan izin dan tidak mengurangi kuota.

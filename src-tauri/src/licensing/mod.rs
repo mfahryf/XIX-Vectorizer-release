@@ -278,6 +278,10 @@ impl LicenseManager {
         Ok(status)
     }
 
+    pub async fn checkout_url(&self) -> Result<String, LicenseError> {
+        self.client.checkout_url().await
+    }
+
     pub async fn activate(&self, license_key: String) -> Result<Status, LicenseError> {
         let identity = self.ensure_identity()?;
         let response = self

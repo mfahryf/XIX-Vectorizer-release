@@ -132,6 +132,17 @@ async function activateLicense() {
     $("license-activate").disabled = false;
   }
 }
+async function resolveLicensePurchaseUrl() {
+  try {
+    const checkoutUrl = await invoke("license_purchase_url");
+    if (typeof checkoutUrl === "string" && checkoutUrl.startsWith("https://")) {
+      return checkoutUrl;
+    }
+  } catch (error) {
+    console.warn("license catalog unavailable; using production fallback", error);
+  }
+  return LICENSE_PURCHASE_URL;
+}
 async function openLicensePurchase() {
   const licenseBuy = $("license-buy");
   if (!openUrl) {
@@ -143,7 +154,7 @@ async function openLicensePurchase() {
   licenseBuy.textContent = "Opening…";
   $("license-status").textContent = "Membuka halaman lisensi…";
   try {
-    await openUrl(LICENSE_PURCHASE_URL);
+    await openUrl(await resolveLicensePurchaseUrl());
     setStatus("HALAMAN LISENSI DIBUKA", false);
   } catch (error) {
     $("license-status").textContent = "Halaman pembelian belum dapat dibuka.";

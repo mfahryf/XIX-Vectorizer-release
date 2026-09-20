@@ -42,6 +42,12 @@ struct DeviceChallengeResponse {
     expires_at: Option<Value>,
 }
 
+#[derive(Clone, Debug, Deserialize)]
+struct PublicCheckoutResponse {
+    product_id: String,
+    checkout_url: String,
+}
+
 impl LicenseClient {
     pub fn new(
         base_url: impl Into<String>,
@@ -151,6 +157,28 @@ impl LicenseClient {
         })?;
         self.validate_trial_token(token, identity)?;
         Ok(response)
+    }
+
+    pub async fn checkout_url(&self) -> Result<String, LicenseError> {
+        let response = self
+            .http
+            .get(self.endpoint("/v1/desktop/products/xix-vectorizer"))
+            .header("X-Desktop-Product", PRODUCT_ID)
+            .send()
+            .await
+            .map_err(|error| LicenseError::Network(error.to_string()))?;
+        let value = response_value(response).await?;
+        let product: PublicCheckoutResponse = serde_json::from_value(value)
+            .map_err(|error| LicenseError::Network(format!("checkout catalog tidak valid: {error}")))?;
+        let parsed = reqwest::Url::parse(&product.checkout_url)
+            .map_err(|error| LicenseError::Network(format!("checkout URL tidak valid: {error}")))?;
+        if product.product_id != PRODUCT_ID
+            || parsed.scheme() != "https"
+            || parsed.host_str().is_none()
+        {
+            return Err(LicenseError::Network("checkout URL tidak valid".into()));
+        }
+        Ok(product.checkout_url)
     }
 
     pub async fn activate(
@@ -575,6 +603,34 @@ mod tests {
                 "Mayar rejected software license verification (HTTP 404)".into()
             )
         );
+        server.join().expect("test server join");
+    }
+
+    #[tokio::test]
+    async fn fetches_public_checkout_url_from_gateway_catalog() {
+        crate::net::http::ensure_crypto_provider();
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind test server");
+        let address = listener.local_addr().expect("test server address");
+        let server = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept test request");
+            let mut request = [0_u8; 4096];
+            let size = stream.read(&mut request).expect("read test request");
+            let request = String::from_utf8_lossy(&request[..size]);
+            assert!(request.starts_with("GET /v1/desktop/products/xix-vectorizer HTTP/1.1"));
+            let body = br#"{"product_id":"xix-vectorizer","checkout_url":"https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license"}"#;
+            write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .expect("write test headers");
+            stream.write_all(body).expect("write test body");
+        });
+
+        let client = LicenseClient::new(format!("http://{address}"), None).expect("client");
+        let checkout_url = client.checkout_url().await.expect("checkout URL");
+
+        assert_eq!(checkout_url, "https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license");
         server.join().expect("test server join");
     }
 }
