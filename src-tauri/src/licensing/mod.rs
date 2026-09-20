@@ -397,16 +397,28 @@ impl LicenseManager {
         state.server_provider_status = response.provider_status;
         state.server_subscription_status = response.subscription_status;
         state.server_access_status = response.access_status;
+        let server_reports_active = matches!(
+            state.server_license_state.as_deref(),
+            Some("active" | "licensed" | "licensed-online")
+        );
+        if server_reports_active {
+            if let Some(lease) = response.lease {
+                state.lease_verified = true;
+                state.lease = Some(lease);
+            } else {
+                state.lease = None;
+                state.lease_verified = false;
+            }
+        } else {
+            state.lease = None;
+            state.lease_verified = false;
+        }
         if let Some(remaining) = response.trial_remaining {
             state.trial.merge_remaining(remaining);
         } else if !response.trial_remaining_by_engine.is_empty() {
             state
                 .trial
                 .merge_remaining_by_engine(&response.trial_remaining_by_engine);
-        }
-        if let Some(lease) = response.lease {
-            state.lease_verified = true;
-            state.lease = Some(lease);
         }
         self.store.save(&state)
     }

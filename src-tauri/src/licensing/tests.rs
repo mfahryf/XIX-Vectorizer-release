@@ -437,6 +437,50 @@ fn current_status_time_is_not_replaced_by_historical_lease_time() {
     assert_eq!(manager.state.lock().last_server_time, Some(now));
 }
 
+#[test]
+fn server_reset_clears_cached_lease() {
+    let dir = tempfile_dir("server-reset-clears-lease");
+    let client = crate::licensing::LicenseClient::new("http://127.0.0.1:1", None).unwrap();
+    let manager = LicenseManager::with_client(&dir, client).unwrap();
+    let now = crate::licensing::usage::unix_now();
+    manager.state.lock().lease = Some(LeasePayload {
+        product_id: "xix-vectorizer".into(),
+        device_fingerprint: "device-a".into(),
+        license_state: "active".into(),
+        subscription_expires_at: now + 86_400,
+        lease_expires_at: now + 3_600,
+        issued_at: now,
+        server_time: now,
+        key_id: "gateway-2026-01".into(),
+        signature: "test-signature".into(),
+    });
+    manager.state.lock().lease_verified = true;
+
+    manager
+        .store_gateway_status(crate::licensing::GatewayStatus {
+            license_state: Some("unactivated".into()),
+            device_state: Some("registered".into()),
+            server_time: Some(now + 1),
+            lease: Some(LeasePayload {
+                product_id: "xix-vectorizer".into(),
+                device_fingerprint: "device-a".into(),
+                license_state: "active".into(),
+                subscription_expires_at: now + 86_400,
+                lease_expires_at: now + 3_600,
+                issued_at: now,
+                server_time: now,
+                key_id: "gateway-2026-01".into(),
+                signature: "stale-signature".into(),
+            }),
+            ..Default::default()
+        })
+        .unwrap();
+
+    let state = manager.state.lock();
+    assert!(state.lease.is_none());
+    assert!(!state.lease_verified);
+}
+
 #[tokio::test]
 async fn fresh_manager_reports_trial_without_network_call() {
     let dir = tempfile_dir("manager");
