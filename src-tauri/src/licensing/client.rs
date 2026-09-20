@@ -1,6 +1,6 @@
 use crate::licensing::device::DeviceIdentity;
 use crate::licensing::error::LicenseError;
-use crate::licensing::models::{GatewayStatus, LeasePayload, TrialToken, PRODUCT_ID, TRIAL_FILE_LIMIT};
+use crate::licensing::models::{GatewayStatus, LeasePayload, TrialToken, PRODUCT_ID, TRIAL_FILE_LIMIT, TRIAL_TOTAL_LIMIT};
 use crate::licensing::usage::UsageRecord;
 use base64::engine::general_purpose::{STANDARD as BASE64, URL_SAFE_NO_PAD};
 use base64::Engine;
@@ -528,6 +528,9 @@ pub fn verify_trial_token_signature(payload: &Value, signature: &str, key: &Veri
 }
 
 fn valid_trial_counters(payload: &Value) -> bool {
+    if let Some(remaining) = payload.get("trial_remaining").and_then(Value::as_u64) {
+        return remaining <= u64::from(TRIAL_TOTAL_LIMIT);
+    }
     let Some(counters) = payload
         .get("trial_remaining_by_engine")
         .and_then(Value::as_object)

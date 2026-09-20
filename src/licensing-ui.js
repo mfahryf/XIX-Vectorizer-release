@@ -6,15 +6,26 @@
   }
 })(typeof globalThis === "object" ? globalThis : this, function () {
   const ENGINE_IDS = ["vectorize-v1", "vectorize-v2", "pngtosvg"];
+  const TRIAL_TOTAL_LIMIT = 10;
 
   function deriveLicenseView(status) {
     const state = status && status.license_state ? status.license_state : "unavailable";
     const remaining = (status && status.trial_remaining_by_engine) || {};
+    const reportedTotal = Number(status && status.trial_remaining);
+    const trialRemaining = Number.isFinite(reportedTotal)
+      ? Math.max(0, Math.min(TRIAL_TOTAL_LIMIT, reportedTotal))
+      : Math.max(
+          0,
+          Math.min(
+            TRIAL_TOTAL_LIMIT,
+            Object.values(remaining).reduce((total, value) => total + (Number(value) || 0), 0),
+          ),
+        );
     const engineCounters = ENGINE_IDS.map((id) => ({
       id,
       remaining: Number.isFinite(Number(remaining[id])) ? Number(remaining[id]) : 0,
     }));
-    const hasTrial = engineCounters.some((engine) => engine.remaining > 0);
+    const hasTrial = trialRemaining > 0;
     const licensed = state === "licensed" || state === "licensed-offline";
     const canProcess = licensed || (state === "trial" && hasTrial);
     const canStart = canProcess || state === "unactivated";
@@ -25,7 +36,9 @@
       message = "Process the first file to activate your online trial.";
     } else if (state === "trial") {
       badge = "TRIAL";
-      message = hasTrial ? "Trial: 5 successful files per engine." : "Trial exhausted. Activate a license to continue.";
+      message = hasTrial
+        ? `Trial: ${trialRemaining} successful files total.`
+        : "Trial exhausted. Activate a license to continue.";
     } else if (state === "licensed") {
       badge = "LICENSED";
       message = "Lisensi aktif.";
@@ -68,6 +81,7 @@
       badge,
       message,
       helpMessage,
+      trialRemaining,
       engineCounters,
       deviceState: status && status.device_state ? status.device_state : "unknown",
       recoveryRequestCode: status && status.recovery_request_code

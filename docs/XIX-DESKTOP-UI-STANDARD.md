@@ -81,7 +81,7 @@ Urutan isi modal:
 
 1. Badge dan status lisensi.
 2. Label `Trial Limit:`.
-3. Counter setiap engine, misalnya `V1: 5/5`, `V2: 5/5`, dan `V3: 5/5`.
+3. Satu counter bersama, misalnya `TOTAL: 10/10`, yang berlaku untuk semua engine.
 4. Kolom license key dan tombol `ACTIVATE`.
 5. Bantuan singkat sesuai kondisi lisensi.
 6. Tombol `Get License` di bagian bawah untuk membuka checkout publik aplikasi.
@@ -112,7 +112,7 @@ memiliki beberapa engine:
 
 - satu aplikasi memiliki satu `product_id` dan satu produk pembayaran;
 - seluruh aplikasi memakai lisensi berlangganan bulanan;
-- trial dihitung lima file berhasil per engine;
+- trial dihitung sepuluh file berhasil total lintas engine;
 - file gagal, dibatalkan, atau retry idempoten tidak mengurangi kuota tambahan;
 - satu lisensi hanya boleh aktif pada satu perangkat;
 - perubahan perangkat dilakukan melalui reset HWID oleh admin, bukan otomatis
@@ -138,7 +138,7 @@ aplikasi dan gateway:
 | --- | --- | --- |
 | `product_id` | `xix-vectorizer` | Stabil dan unik per aplikasi |
 | Nama aplikasi | `Vectorizer` | Tanpa awalan pada judul jendela |
-| Engine ID | `vectorize-v1` | Setiap engine memiliki counter trial sendiri |
+| Engine ID | `vectorize-v1` | Engine digunakan untuk memilih proses; seluruh engine berbagi counter trial |
 | URL checkout sandbox | URL publik Mayar sandbox | Dipakai hanya untuk test |
 | URL checkout production | URL publik production | Dipakai setelah cutover |
 | Gateway URL | `https://payment.xixlabs.net` | Desktop tidak menghubungi Mayar langsung |
@@ -186,7 +186,7 @@ dan link installer stabilnya adalah
 - [ ] Ikon shortcut, executable, installer, dan title bar berasal dari aset yang
       sama.
 - [ ] Tombol `KeyRound` berada di kanan Settings dan tidak memiliki label visual.
-- [ ] Modal lisensi menampilkan `Trial Limit:` sebelum counter engine.
+- [ ] Modal lisensi menampilkan `Trial Limit:` sebelum counter total bersama.
 - [ ] `Get License` berada di bagian paling bawah modal dan membuka browser.
 - [ ] Modal tetap terbaca pada status trial, active, offline, expired, revoked,
       device conflict, dan error koneksi.
@@ -195,7 +195,7 @@ dan link installer stabilnya adalah
 
 ### Lisensi dan data
 
-- [ ] Lima file berhasil per engine terhitung tepat sekali.
+- [ ] Sepuluh file berhasil total lintas engine terhitung tepat sekali.
 - [ ] Satu license key ditolak pada perangkat kedua sampai admin melakukan reset.
 - [ ] Lease offline 14 hari dapat dipakai dan pemrosesan terkunci setelah habis.
 - [ ] Online pada hari berikutnya memperbarui lease bila subscription masih aktif.
@@ -226,7 +226,8 @@ dan link installer stabilnya adalah
 2. Terapkan title bar dan nama paket sesuai bagian Identitas aplikasi.
 3. Generate ikon Tauri dan masukkan seluruh target ikon ke konfigurasi bundle.
 4. Tambahkan tombol `KeyRound` dan modal lisensi mengikuti urutan standar.
-5. Daftarkan engine ID dan kuota lima file per engine di gateway.
+5. Daftarkan engine ID untuk validasi proses dan `trial_quota: 10` sebagai
+   satu kuota trial bersama di gateway.
 6. Daftarkan satu produk Mayar untuk satu aplikasi.
 7. Uji sandbox end-to-end: checkout, webhook, penerbitan key, aktivasi, renewal,
    offline, expiry, device conflict, dan reset HWID.

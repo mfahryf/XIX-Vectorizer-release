@@ -8,12 +8,18 @@
 
 **Tech Stack:** Tauri 2, HTML/CSS/JavaScript vanilla, aset SVG XIXLabs, generator ikon Tauri, Node.js test runner.
 
+> **Catatan implementasi terbaru (2026-09-20):** Modal lisensi kini menampilkan
+> satu counter `TOTAL: n/10` untuk seluruh engine. Rujukan standar UI terbaru
+> ada di `docs/XIX-DESKTOP-UI-STANDARD.md`; instruksi lama tentang tiga counter
+> terpisah adalah catatan historis.
+
 ## Global Constraints
 
 - Aplikasi yang dikerjakan sekarang adalah `XIX-Vectorizer`; aplikasi desktop XIX-* lain hanya menerima dokumentasi standar.
 - Aset sumber merek adalah `E:/Playground/XIXLabs/XIX-AnimotionV2/frontend/public/XIX.svg`.
 - Tombol lisensi tetap icon-only di toolbar menggunakan `KeyRound`; modal lisensi tetap menjadi tempat status, trial, aktivasi, dan pembelian.
-- Trial tetap lima file berhasil per engine, satu lisensi per aplikasi, satu perangkat, dan lease offline 14 hari.
+- Trial memiliki 10 file berhasil total lintas engine, satu lisensi per aplikasi,
+  satu perangkat, dan lease offline 14 hari.
 - Tidak menambahkan secret, API key, atau kredensial Mayar ke frontend maupun binary desktop.
 - Link pembelian lisensi berasal dari konfigurasi URL publik aplikasi dan tidak memuat credential.
 
@@ -56,7 +62,8 @@ Gunakan selector/id yang memang dipakai runtime (`license-trial-v1`, `license-bu
 
 - [ ] **Step 1: Ubah copy counter trial**
 
-Pertahankan tiga counter engine, tetapi tampilkan heading `Trial Limit:` sebelum baris counter. Jangan mengubah nilai counter atau aturan trial.
+Pertahankan heading `Trial Limit:`, tetapi tampilkan satu counter total bersama
+sebelum input aktivasi. Jangan membuat counter terpisah per engine.
 
 - [ ] **Step 2: Tambahkan tombol pembelian**
 
@@ -64,7 +71,7 @@ Tambahkan tombol `id="license-buy"` di bawah bantuan lisensi dengan `type="butto
 
 - [ ] **Step 3: Rapikan hierarchy modal**
 
-Jaga urutan: badge/status, `Trial Limit:`, counter engine, input aktivasi, bantuan, lalu `Get License`. Gunakan style tombol yang sudah dipakai modal agar tidak menciptakan pola visual baru.
+Jaga urutan: badge/status, `Trial Limit:`, counter total, input aktivasi, bantuan, lalu `Get License`. Gunakan style tombol yang sudah dipakai modal agar tidak menciptakan pola visual baru.
 
 - [ ] **Step 4: Jalankan test UI**
 
@@ -128,7 +135,9 @@ Tetapkan tombol toolbar icon-only `KeyRound`, label aksesibel, urutan konten mod
 
 - [ ] **Step 3: Dokumentasikan kontrak lisensi**
 
-Catat trial lima file per engine, satu aplikasi satu lisensi, satu perangkat, reset HWID melalui admin, lease 14 hari, dan penguncian pemrosesan setelah validasi kedaluwarsa.
+Catat trial 10 file total lintas engine, satu aplikasi satu lisensi, satu perangkat,
+reset HWID melalui admin, lease 14 hari, dan penguncian pemrosesan setelah
+validasi kedaluwarsa.
 
 - [ ] **Step 4: Dokumentasikan checklist rilis**
 

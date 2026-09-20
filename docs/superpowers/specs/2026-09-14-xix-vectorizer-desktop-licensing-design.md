@@ -5,6 +5,11 @@
 **Produk:** `xix-vectorizer`  
 **Cakupan:** Aplikasi desktop XIXLabs
 
+> **Catatan implementasi terbaru (2026-09-20):** Aturan trial yang berlaku
+> sekarang adalah satu kuota bersama sebanyak 10 file berhasil lintas engine.
+> Bagian lama yang menyebut kuota terpisah per engine adalah rancangan awal;
+> kontrak operasional terbaru ada di `docs/DESKTOP-LICENSING-CONTRACT.md`.
+
 ## Tujuan
 
 Menambahkan sistem lisensi terpusat untuk XIX-Vectorizer tanpa mewajibkan
@@ -21,10 +26,10 @@ dipulihkan admin saat pengguna mengganti perangkat atau kehilangan data lokal.
 - Satu license key hanya aktif pada satu perangkat.
 - Penggantian perangkat dilakukan melalui reset device binding oleh admin.
 - Trial dimulai otomatis saat file pertama diproses.
-- Setiap engine memiliki trial lima file berhasil secara terpisah: `vectorize-v1`,
-  `vectorize-v2`, dan `pngtosvg` (nama tampilan: Vectorize V3).
-- Setelah satu engine mencapai lima file, hanya engine itu yang terkunci.
-- Setelah semua engine menghabiskan trial, seluruh pemrosesan memerlukan lisensi.
+- Trial memiliki 10 file berhasil total untuk `vectorize-v1`, `vectorize-v2`,
+  dan `pngtosvg` (nama tampilan: Vectorize V3).
+- Semua engine berbagi satu penghitung; setelah total habis, seluruh pemrosesan
+  memerlukan lisensi.
 - Lease lokal berlaku maksimal 14 hari sejak validasi terakhir.
 - Pembayaran terkonfirmasi membuat atau memperpanjang lisensi secara otomatis,
   menampilkan license key, dan mengirimkannya ke email pembeli.
@@ -73,21 +78,23 @@ lama 14 hari dan tidak boleh melewati tanggal berakhir lisensi bulanan.
 
 ### Trial usage
 
-Jumlah file berhasil yang sudah diproses oleh setiap engine selama trial.
-Status utamanya disimpan server-side agar penghapusan file lokal tidak mengulang
+Jumlah file berhasil yang sudah diproses oleh seluruh engine selama trial,
+dengan batas total 10 file untuk satu pasangan product-device. Status utamanya
+disimpan server-side agar penghapusan file lokal atau reinstall tidak mengulang
 trial.
 
 ## State aplikasi
 
-State aplikasi merupakan gabungan status lisensi produk dan kuota tiap engine.
+State aplikasi merupakan gabungan status lisensi produk dan satu kuota trial
+bersama untuk seluruh engine.
 
 | State | Kondisi | Perilaku |
 |---|---|---|
 | `unactivated` | Belum ada trial atau lisensi | Tampilkan aktivasi; trial dibuat ketika file pertama diproses |
-| `trial-active` | Sedikitnya satu engine masih memiliki kuota | Engine yang tersedia dapat memproses |
+| `trial-active` | Total trial masih memiliki kuota | Engine yang valid dapat memproses selama sisa total mencukupi |
 | `licensed-online` | Lisensi aktif dan lease valid | Semua engine terbuka |
 | `licensed-offline` | Server tidak dihubungi, lease belum habis | Semua engine tetap terbuka |
-| `engine-trial-exhausted` | Satu engine sudah mencapai lima file | Engine tersebut terkunci; engine lain mengikuti kuotanya |
+| `trial-exhausted` | Total trial sudah mencapai 10 file | Semua pemrosesan trial terkunci |
 | `expired-offline` | Lease lokal habis | Semua pemrosesan dikunci sampai validasi online berhasil |
 | `subscription-expired` | Langganan bulanan berakhir | Semua pemrosesan dikunci sampai diperpanjang |
 | `revoked` | Lisensi dicabut admin | Semua pemrosesan dikunci dan alasan ditampilkan |
@@ -116,8 +123,9 @@ menghapus bukti pembayaran.
    perangkat aman.
 2. Aplikasi meminta trial produk ke payment gateway.
 3. Server memastikan perangkat belum pernah memperoleh trial produk tersebut.
-4. Server mengembalikan trial dengan kuota lima file untuk setiap engine.
-5. Aplikasi memproses file dan memperbarui penghitung engine yang dipakai.
+4. Server mengembalikan trial dengan `trial_remaining: 10` sebagai kuota
+   bersama untuk seluruh engine.
+5. Aplikasi memproses file dan memperbarui penghitung total.
 
 Satu file sumber yang menghasilkan output valid mengurangi satu kuota. Satu
 batch berisi sepuluh file mengurangi sepuluh kuota. File gagal, dibatalkan,
@@ -182,8 +190,9 @@ license key; renewal tidak memuat raw key. Server tidak pernah mengirim
 rahasia Mayar ke desktop.
 
 Respons status minimal memuat status lisensi, tanggal berakhir langganan,
-tanggal berakhir lease, status binding, sisa trial per engine, alasan lock,
-waktu server, dan tanda tangan server.
+tanggal berakhir lease, status binding, sisa trial total, alasan lock, waktu
+server, dan tanda tangan server. Field lama `trial_remaining_by_engine` tetap
+dapat dibaca untuk kompatibilitas, tetapi tidak menjadi sumber kuota baru.
 
 Semua endpoint aktivasi, renewal, pencatatan penggunaan, dan webhook pembayaran
 harus idempoten.
@@ -198,7 +207,8 @@ Skema final mengikuti database pusat, tetapi harus mencakup tanggung jawab berik
 - `devices`: identitas perangkat publik dan status binding.
 - `license_activations`: hubungan lisensi-perangkat dan riwayat aktivasi.
 - `license_entitlements`: hak akses produk atau engine.
-- `trial_usage`: penghitung file berhasil per engine dan perangkat.
+- `trial_usage`: penghitung file berhasil total per product-device; engine ID
+  tetap dicatat pada event pemakaian untuk audit.
 - `license_leases`: lease yang diterbitkan dan masa berlakunya.
 - `license_events`: audit pembayaran, aktivasi, renewal, reset, suspend, revoke,
   dan pemulihan.
@@ -236,7 +246,7 @@ Implementasi dipusatkan pada batas lisensi dan tidak mengubah algoritma engine:
 ## Pengalaman pengguna
 
 Halaman lisensi menampilkan nama produk, status perangkat, tombol aktivasi,
-kuota trial setiap engine seperti `V1 3/5`, masa offline yang tersisa, alasan
+kuota trial bersama seperti `TOTAL 7/10`, masa offline yang tersisa, alasan
 penguncian, dan kontak bantuan. HWID mentah tidak ditampilkan. Untuk dukungan,
 aplikasi membuat kode permintaan pemulihan yang aman.
 
@@ -245,8 +255,8 @@ aplikasi membuat kode permintaan pemulihan yang aman.
 Implementasi dianggap selesai jika:
 
 1. Trial otomatis dibuat pada pemrosesan file pertama.
-2. Setiap engine dapat memproses tepat lima file berhasil.
-3. Engine yang habis kuota terkunci tanpa mengunci engine lain.
+2. Semua engine bersama-sama dapat memproses tepat 10 file berhasil.
+3. Setelah total habis, semua engine trial terkunci.
 4. File gagal, batal, dan retry idempoten mengikuti aturan kuota.
 5. Trial tidak kembali setelah reinstall atau penghapusan cache.
 6. Key valid membuka semua engine.

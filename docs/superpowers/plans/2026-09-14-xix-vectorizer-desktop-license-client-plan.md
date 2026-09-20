@@ -8,13 +8,18 @@
 
 **Tech Stack:** Tauri 2, Rust 2021, reqwest/rustls, serde/serde_json, Ed25519, Windows DPAPI, tokio, vanilla JavaScript, Node test runner, Cargo tests.
 
+> **Catatan implementasi terbaru (2026-09-20):** Trial client telah disederhanakan
+> menjadi satu penghitung total 10 file berhasil lintas engine. Rujukan untuk
+> perilaku yang berlaku adalah `docs/DESKTOP-LICENSING-CONTRACT.md`; contoh
+> lama yang memisahkan counter per engine di bawah ini bersifat historis.
+
 ## Global Constraints
 
 - `product_id` desktop adalah `xix-vectorizer`.
 - ID engine yang dipakai oleh kontrak adalah `vectorize-v1`, `vectorize-v2`, dan `pngtosvg`; `pngtosvg` ditampilkan sebagai Vectorize V3.
 - Trial otomatis dimulai ketika file pertama akan diproses, bukan ketika aplikasi sekadar dibuka.
-- Setiap engine memiliki lima file berhasil untuk trial secara terpisah.
-- Engine yang kuotanya habis terkunci; engine lain tetap mengikuti kuotanya.
+- Trial memiliki 10 file berhasil total dan dipakai bersama oleh semua engine.
+- Engine tetap dipilih untuk proses, tetapi tidak memiliki kuota trial terpisah.
 - License key bulanan membuka seluruh engine.
 - Satu license key hanya boleh memiliki satu device binding aktif.
 - Lease lokal berlaku paling lama 14 hari dan tidak melewati masa langganan.
@@ -41,7 +46,7 @@ Sebelum integrasi production, endpoint berikut harus tersedia pada base URL
 - `POST /v1/desktop/usage/record`
 
 Response harus menyediakan `license_state`, `subscription_expires_at`,
-`lease_expires_at`, `device_state`, `trial_remaining_by_engine`, `reason`,
+`lease_expires_at`, `device_state`, `trial_remaining`, `reason`,
 `server_time`, `key_id`, dan signature lease.
 
 ## File map
@@ -103,7 +108,7 @@ memuat private key atau raw license key.
 
 - [ ] **Step 1: Tulis unit test gagal untuk state dan mapping.**
 
-Uji mapping tiga engine aktual, counter lima file, lock per engine, dan status
+Uji mapping tiga engine aktual, counter total 10 file, lock setelah total habis, dan status
 aplikasi ketika semua counter habis.
 
 ```rust
@@ -387,7 +392,7 @@ git commit -m "feat: enforce license gate in vectorizer batches"
 
 **Interfaces:**
 - Consumes: Tauri commands and `LicenseStatus` dari Task 3–4.
-- Produces: UI aktivasi, trial counters per engine, warning lease, dan locked state yang tidak mengganggu file lama.
+- Produces: UI aktivasi, satu trial counter total, warning lease, dan locked state yang tidak mengganggu file lama.
 
 - [ ] **Step 1: Tulis test UI gagal.**
 
@@ -435,7 +440,7 @@ license-trial-v3
 license-help
 ```
 
-`license-trial-v3` menampilkan counter untuk engine ID `pngtosvg`. Jangan
+`license-trial-total` menampilkan counter total untuk seluruh engine. Jangan
 menampilkan HWID mentah atau private key.
 
 - [ ] **Step 5: Hubungkan startup dan tombol Start.**
@@ -504,7 +509,7 @@ Expected: Tauri build selesai tanpa error dan resource `pngtosvg-runtime` serta
 - [ ] **Step 3: Jalankan smoke test dengan gateway development.**
 
 Gunakan endpoint test dan key signing test, bukan production secret. Verifikasi
-urutan: fresh install → first file claim → lima file per engine → engine lock →
+urutan: fresh install → first file claim → sepuluh file lintas engine → trial lock →
 license activation → second device conflict → simulated offline lease → lease
 expiry → online refresh → cache deletion recovery → device identity deletion
 recovery.

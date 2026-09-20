@@ -2,7 +2,7 @@
 <html lang="id">
 <head>
   <meta charset="utf-8">
-  <title>Vectorizer v0.1.6 by XIXLabs.net</title>
+  <title>Vectorizer v0.1.7 by XIXLabs.net</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body data-theme="glass">
@@ -16,7 +16,7 @@
         <img id="titlebar-brand" src="assets/XIX.svg" alt="XIXLabs" draggable="false" data-tauri-drag-region>
         <span id="titlebar-label" data-tauri-drag-region>VECTORIZER</span>
         <span id="titlebar-byline" data-tauri-drag-region>by XIXLabs.net</span>
-        <span id="titlebar-version" data-tauri-drag-region>v0.1.6</span>
+        <span id="titlebar-version" data-tauri-drag-region>v0.1.7</span>
       </span>
       <div class="win-controls">
         <button id="btn-min" title="Minimize"><svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/></svg></button>
@@ -164,17 +164,31 @@
           <div id="license-status">Memeriksa status lisensi…</div>
           <div class="license-trial-label">Trial Limit:</div>
           <div class="license-trials">
-            <span id="license-trial-v1">V1: —</span>
-            <span id="license-trial-v2">V2: —</span>
-            <span id="license-trial-v3">V3: —</span>
+            <span id="license-trial-total">TOTAL: —/10</span>
           </div>
           <div class="license-actions">
             <input id="license-key" type="password" autocomplete="off" spellcheck="false" placeholder="Kode lisensi Mayar" aria-label="Kode lisensi Mayar">
             <button id="license-activate" type="button">ACTIVATE</button>
           </div>
-          <div id="license-help">Trial: 5 successful files per engine. Satu lisensi Mayar untuk satu perangkat.</div>
+          <div id="license-help">Trial: 10 successful files total. Satu lisensi Mayar untuk satu perangkat.</div>
           <button id="license-buy" type="button" aria-label="Get License">Get License</button>
         </section>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===== UPDATE MODAL ===== -->
+  <div id="update-modal-overlay" class="hidden" aria-hidden="true">
+    <div id="update-modal" role="dialog" aria-modal="true" aria-labelledby="update-modal-title">
+      <div class="modal-title">
+        <span id="update-modal-title">UPDATE AVAILABLE</span>
+      </div>
+      <div class="modal-body">
+        <div id="update-message">A new version of XIX Vectorizer is available.</div>
+        <div class="modal-actions">
+          <button id="update-later" type="button">Later</button>
+          <button id="update-install" type="button">Update now</button>
+        </div>
       </div>
     </div>
   </div>

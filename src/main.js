@@ -28,6 +28,8 @@ const state = {
   licenseView: null,
 };
 
+let pendingUpdate = null;
+
 // ---------------- LCD / status helpers ----------------
 function setLcd(text) {
   $("lcd-status").textContent = text;
@@ -42,9 +44,7 @@ function renderLicenseStatus(status) {
   $("license-badge").textContent = view.badge;
   $("license-status").textContent = view.message;
   $("license-panel").classList.toggle("license-locked", !view.canProcess);
-  $("license-trial-v1").textContent = `V1: ${view.engineCounters[0].remaining}/5`;
-  $("license-trial-v2").textContent = `V2: ${view.engineCounters[1].remaining}/5`;
-  $("license-trial-v3").textContent = `V3: ${view.engineCounters[2].remaining}/5`;
+  $("license-trial-total").textContent = `TOTAL: ${view.trialRemaining}/10`;
   $("license-help").textContent = view.canProcess
     ? view.helpMessage
     : view.recoveryRequestCode || state.license?.license_state === "unactivated"
@@ -65,29 +65,39 @@ async function loadLicenseStatus() {
       console.warn("license status temporarily unavailable", error);
       return;
     }
-    renderLicenseStatus({ license_state: "unavailable", trial_remaining_by_engine: {} });
+    renderLicenseStatus({ license_state: "unavailable", trial_remaining: 0, trial_remaining_by_engine: {} });
     $("license-status").textContent = "Status lisensi sementara tidak tersedia.";
     console.warn("license status unavailable", error);
   }
 }
-async function checkForUpdates() {
+function showUpdatePrompt(update) {
+  pendingUpdate = update;
+  $("update-message").textContent = `Version ${update.version} is available. Update now?`;
+  $("update-modal-overlay").classList.remove("hidden");
+  $("update-modal-overlay").setAttribute("aria-hidden", "false");
+}
+
+function hideUpdatePrompt() {
+  pendingUpdate = null;
+  $("update-modal-overlay").classList.add("hidden");
+  $("update-modal-overlay").setAttribute("aria-hidden", "true");
+}
+
+async function installUpdate() {
+  const update = pendingUpdate;
   const tauri = window.__TAURI__;
-  if ((!tauri?.updater?.check && !tauri?.core?.invoke) || state.running) return;
+  if (!update || !tauri) return;
+  const button = $("update-install");
+  button.disabled = true;
+  button.textContent = "Installing…";
+  $("update-message").textContent = `Downloading version ${update.version}…`;
   try {
-    const update = tauri.updater?.check
-      ? await tauri.updater.check()
-      : await tauri.core.invoke("plugin:updater|check");
-    if (!update || !update.rid || !update.version) return;
-    const accepted = window.confirm(
-      `A new Vectorizer update (${update.version}) is available. Download and install it now?`,
-    );
-    if (!accepted) return;
     setStatus(`UPDATING TO ${update.version}`, false);
     if (typeof update.downloadAndInstall === "function") {
-      await update.downloadAndInstall();
+      await update.downloadAndInstall(undefined, { restartAfterInstall: true });
     } else {
       const channel = tauri.core.Channel ? new tauri.core.Channel() : null;
-      if (!channel) return;
+      if (!channel) throw new Error("Updater progress channel is unavailable");
       await tauri.core.invoke("plugin:updater|download_and_install", {
         onEvent: channel,
         rid: update.rid,
@@ -99,6 +109,23 @@ async function checkForUpdates() {
     } else {
       await tauri.core.invoke("plugin:process|restart");
     }
+  } catch (error) {
+    button.disabled = false;
+    button.textContent = "Update now";
+    $("update-message").textContent = "The update could not be installed. You can try again later.";
+    console.warn("update installation failed", error);
+  }
+}
+
+async function checkForUpdates() {
+  const tauri = window.__TAURI__;
+  if ((!tauri?.updater?.check && !tauri?.core?.invoke) || state.running) return;
+  try {
+    const update = tauri.updater?.check
+      ? await tauri.updater.check()
+      : await tauri.core.invoke("plugin:updater|check");
+    if (!update || !update.rid || !update.version) return;
+    showUpdatePrompt(update);
   } catch (error) {
     console.warn("update check unavailable", error);
   }
@@ -1010,8 +1037,17 @@ $("license-modal").addEventListener("keydown", trapLicenseModalFocus);
 $("license-modal-overlay").addEventListener("mousedown", (e) => {
   if (e.target === $("license-modal-overlay")) closeLicenseModal();
 });
+$("update-later").onclick = hideUpdatePrompt;
+$("update-install").onclick = installUpdate;
+$("update-modal-overlay").addEventListener("mousedown", (e) => {
+  if (e.target === $("update-modal-overlay")) hideUpdatePrompt();
+});
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape") {
+    if (!$("update-modal-overlay").classList.contains("hidden")) {
+      hideUpdatePrompt();
+      return;
+    }
     if (!$("license-modal-overlay").classList.contains("hidden")) {
       closeLicenseModal();
       return;

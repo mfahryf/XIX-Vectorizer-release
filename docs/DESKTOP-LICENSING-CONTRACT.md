@@ -11,8 +11,8 @@ harus mengikuti pola yang sama dengan product ID dan engine masing-masing.
 - Satu lisensi hanya memiliki satu device binding aktif.
 - Penggantian perangkat dilakukan admin melalui reset binding; menghapus file
   lokal tidak mereset binding server.
-- Trial adalah lima file berhasil per engine. Engine yang habis tetap terkunci
-  sendiri, sedangkan engine lain tetap dapat dipakai.
+- Trial adalah sepuluh file berhasil total untuk seluruh engine. Semua engine
+  berbagi satu penghitung yang sama.
 - Lease offline berlaku maksimal 14 hari dan tidak melewati akhir langganan.
 - Setelah lease habis, pemrosesan dikunci. Ketika perangkat kembali online dan
   langganan masih aktif, lease baru dapat diterbitkan.
@@ -22,7 +22,7 @@ harus mengikuti pola yang sama dengan product ID dan engine masing-masing.
 | State | Pemrosesan | Perilaku |
 | --- | --- | --- |
 | `unactivated` | Belum ada trial | Claim dibuat ketika file pertama akan diproses. |
-| `trial` | Hanya engine dengan sisa kuota | Lima file berhasil per engine. |
+| `trial` | Selama total trial masih tersisa | Sepuluh file berhasil total lintas engine. |
 | `licensed-online` | Semua engine | Lease baru divalidasi server. |
 | `licensed-offline` | Semua engine | Lease lokal masih valid tanpa server. |
 | `expired-offline` | Terkunci | Minta validasi online; data pengguna tetap ada. |
@@ -41,7 +41,8 @@ playlist, dan riwayat tidak boleh dihapus atau diubah karena state lisensi.
 3. Jika lease mendekati atau melewati batas, minta renewal.
 4. Jika tidak ada identitas dan pengguna mulai memproses file, buat identitas
    lalu claim trial online.
-5. Sebelum setiap file trial dimulai, ambil satu izin dari gate per-engine.
+5. Sebelum setiap batch trial dimulai, periksa satu penghitung total yang
+   dipakai bersama oleh semua engine.
 6. Kurangi kuota hanya setelah file berhasil dan output tervalidasi.
 7. Sinkronkan event usage secara idempoten ketika online.
 
@@ -83,7 +84,7 @@ signing private ke desktop.
 ## Checklist rilis
 
 - Fresh install belum membuat claim sebelum file pertama.
-- Satu engine tepat memiliki lima file berhasil selama trial.
+- Semua engine bersama-sama memiliki tepat sepuluh file berhasil selama trial.
 - Batch lebih besar dari sisa trial berhenti tepat setelah kuota habis.
 - File gagal, batal, dan duplicate event tidak mengurangi kuota kedua kali.
 - Key valid membuka semua engine dan tidak disimpan sebagai raw key.

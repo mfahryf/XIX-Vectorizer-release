@@ -15,7 +15,7 @@ npm run test:ui
 cargo test --manifest-path src-tauri/Cargo.toml
 ```
 
-`npm run test:ui` memeriksa shell UI. `cargo test` memeriksa trial per engine,
+`npm run test:ui` memeriksa shell UI. `cargo test` memeriksa trial total lintas engine,
 perangkat, lease, signature, state penguncian, idempotensi pemakaian, dan
 recovery. Public key gateway sudah dipin di client sehingga test tidak
 bergantung pada environment lokal.
@@ -57,7 +57,8 @@ ke production, jadi jangan disalin ke dokumen lain.
 | Skenario | Hasil yang diharapkan |
 | --- | --- |
 | Fresh start, engine belum dipakai | Belum ada claim sebelum file pertama dimulai. |
-| Lima file berhasil pada satu engine | Engine tersebut terkunci; engine lain masih memiliki trial. |
+| Sepuluh file berhasil lintas engine | Trial habis untuk semua engine; lisensi diperlukan untuk melanjutkan. |
+| Lima file berhasil pada satu engine | Trial total berkurang lima; engine lain memakai sisa penghitung yang sama. |
 | File gagal, batal, atau retry idempoten | Kuota tidak berkurang dua kali. |
 | Aktivasi kode Mayar valid | Semua engine terbuka dan kode tidak disimpan mentah di UI/config. |
 | Aktivasi di perangkat kedua | Ditolak sebagai `device-conflict`; tidak membuat binding kedua. |

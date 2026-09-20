@@ -12,17 +12,13 @@ test("expired lease locks processing but leaves recovery actions", () => {
   assert.equal(view.message, "Hubungkan internet untuk memvalidasi lisensi.");
 });
 
-test("trial view exposes a separate counter for every engine", () => {
+test("trial view exposes one shared counter for every engine", () => {
   const view = deriveLicenseView({
     license_state: "trial",
-    trial_remaining_by_engine: { "vectorize-v1": 5, "vectorize-v2": 2, pngtosvg: 0 },
+    trial_remaining: 7,
   });
   assert.equal(view.canProcess, true);
-  assert.deepEqual(view.engineCounters, [
-    { id: "vectorize-v1", remaining: 5 },
-    { id: "vectorize-v2", remaining: 2 },
-    { id: "pngtosvg", remaining: 0 },
-  ]);
+  assert.equal(view.trialRemaining, 7);
   assert.equal(view.badge, "TRIAL");
 });
 
@@ -51,9 +47,9 @@ test("fresh installs explain that processing activates the trial", () => {
 test("trial copy uses the polished English wording", () => {
   const view = deriveLicenseView({
     license_state: "trial",
-    trial_remaining_by_engine: { "vectorize-v1": 5, "vectorize-v2": 5, pngtosvg: 5 },
+    trial_remaining: 10,
   });
-  assert.equal(view.message, "Trial: 5 successful files per engine.");
+  assert.equal(view.message, "Trial: 10 successful files total.");
 });
 
 test("device identity loss exposes recovery code and contact metadata", () => {

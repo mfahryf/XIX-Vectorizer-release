@@ -1058,6 +1058,73 @@ body #license-modal #license-refresh:hover,
 body #license-modal #license-close:hover { background: rgba(255, 255, 255, 0.24); }
 body #license-modal #license-refresh:active,
 body #license-modal #license-close:active { transform: scale(0.94); }
+
+/* ===== update modal ===== */
+#update-modal-overlay {
+  position: fixed; inset: 0;
+  display: flex; align-items: center; justify-content: center;
+  padding: 14px;
+  box-sizing: border-box;
+  background: rgba(0, 0, 0, 0.65);
+  z-index: 120;
+}
+body #update-modal {
+  width: min(320px, calc(100vw - 28px));
+  background:
+    radial-gradient(circle at 15% 15%, var(--glow-1) 0%, transparent 45%),
+    radial-gradient(circle at 85% 20%, var(--glow-2) 0%, transparent 45%),
+    linear-gradient(160deg, var(--base-1) 0%, var(--base-2) 55%, var(--base-3) 100%);
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  border-radius: 18px;
+  border: 1px solid var(--glass-border);
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.5), inset 0 1px 0 var(--glass-highlight);
+}
+body #update-modal .modal-title {
+  height: 30px;
+  display: flex; align-items: center;
+  padding: 0 12px;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.03));
+  border-bottom: 1px solid rgba(255, 255, 255, 0.18);
+  color: var(--text);
+  font-size: 9px;
+  font-weight: 600;
+  letter-spacing: 1.2px;
+}
+body #update-modal .modal-body {
+  padding: 14px;
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+body #update-modal .modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 14px;
+}
+body #update-modal .modal-actions button {
+  min-width: 86px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  border-radius: 8px;
+  color: var(--text);
+  background: rgba(255, 255, 255, 0.12);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+body #update-modal #update-install {
+  color: #fff;
+  background: linear-gradient(180deg, rgba(125, 211, 255, 0.58), rgba(185, 140, 255, 0.46));
+}
+body #update-modal .modal-actions button:hover { background: rgba(255, 255, 255, 0.24); }
+body #update-modal .modal-actions button:disabled { opacity: 0.65; cursor: wait; }
+body #update-modal button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
 body #btn-license:focus-visible,
 body #btn-settings:focus-visible,
 body #license-modal button:focus-visible,

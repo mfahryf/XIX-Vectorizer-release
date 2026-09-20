@@ -13,14 +13,14 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 
 #[test]
-fn trial_uses_real_engine_ids_and_locks_only_exhausted_engine() {
+fn trial_uses_real_engine_ids_with_one_shared_counter() {
     let mut trial = TrialState::new(["vectorize-v1", "vectorize-v2", "pngtosvg"]);
-    assert_eq!(trial.remaining("pngtosvg"), 5);
+    assert_eq!(trial.remaining("pngtosvg"), 10);
     for index in 0..5 {
         assert!(trial.record_success("pngtosvg", &format!("usage-{index}")));
     }
-    assert_eq!(trial.remaining("pngtosvg"), 0);
-    assert!(trial.is_locked("pngtosvg"));
+    assert_eq!(trial.remaining("pngtosvg"), 5);
+    assert!(!trial.is_locked("pngtosvg"));
     assert_eq!(trial.remaining("vectorize-v1"), 5);
     assert_eq!(trial.state(), LicenseState::Trial);
 }
@@ -38,15 +38,43 @@ fn trial_usage_is_idempotent_and_never_goes_negative() {
 }
 
 #[test]
-fn preflight_locks_only_when_requested_files_exceed_engine_quota() {
+fn trial_uses_one_total_counter_across_engines() {
+    let mut trial = TrialState::new(["vectorize-v1", "vectorize-v2", "pngtosvg"]);
+
+    for index in 0..5 {
+        assert!(trial.record_success("vectorize-v1", &format!("v1-{index}")));
+    }
+    for index in 0..5 {
+        assert!(trial.record_success("vectorize-v2", &format!("v2-{index}")));
+    }
+
+    assert_eq!(trial.remaining("pngtosvg"), 0);
+    assert!(!trial.preflight("pngtosvg", 1).allowed);
+    assert!(!trial.record_success("pngtosvg", "v3-1"));
+}
+
+#[test]
+fn legacy_engine_counters_are_migrated_once_into_the_shared_counter() {
+    let mut trial = TrialState::new(["vectorize-v1", "vectorize-v2", "pngtosvg"]);
+    trial.engines.get_mut("vectorize-v1").unwrap().successful_files = 5;
+    trial.engines.get_mut("vectorize-v2").unwrap().successful_files = 5;
+
+    assert!(trial.migrate_legacy());
+    assert_eq!(trial.total_remaining(), 0);
+    assert!(!trial.preflight("pngtosvg", 1).allowed);
+    assert!(!trial.migrate_legacy());
+}
+
+#[test]
+fn preflight_uses_the_shared_trial_quota() {
     let mut trial = TrialState::new(["vectorize-v1", "vectorize-v2", "pngtosvg"]);
     for index in 0..3 {
         assert!(trial.record_success("vectorize-v2", &format!("event-{index}")));
     }
-    assert!(trial.preflight("vectorize-v2", 2).allowed);
-    let denied = trial.preflight("vectorize-v2", 3);
+    assert!(trial.preflight("vectorize-v2", 7).allowed);
+    let denied = trial.preflight("vectorize-v2", 8);
     assert!(!denied.allowed);
-    assert_eq!(denied.remaining, 2);
+    assert_eq!(denied.remaining, 7);
     assert!(trial.preflight("pngtosvg", 5).allowed);
 }
 
@@ -55,12 +83,9 @@ fn trial_status_merge_does_not_restore_unsynced_local_successes() {
     let mut trial = TrialState::new(["vectorize-v1"]);
     assert!(trial.record_success("vectorize-v1", "local-success"));
 
-    let server_snapshot = [("vectorize-v1".to_string(), 5_u8)]
-        .into_iter()
-        .collect();
-    trial.merge_remaining_by_engine(&server_snapshot);
+    trial.merge_remaining(10);
 
-    assert_eq!(trial.remaining("vectorize-v1"), 4);
+    assert_eq!(trial.remaining("vectorize-v1"), 9);
 }
 
 #[test]
@@ -398,9 +423,8 @@ async fn fresh_manager_reports_trial_without_network_call() {
     let manager = LicenseManager::with_client(&dir, client).unwrap();
     let status = manager.status().await.unwrap();
     assert_eq!(status.license_state, LicenseState::Unactivated);
-    assert_eq!(status.trial_remaining_by_engine["vectorize-v1"], 5);
-    assert_eq!(status.trial_remaining_by_engine["vectorize-v2"], 5);
-    assert_eq!(status.trial_remaining_by_engine["pngtosvg"], 5);
+    assert_eq!(status.trial_remaining, 10);
+    assert!(status.trial_remaining_by_engine.is_empty());
     assert!(!DeviceIdentityStore::path(&dir).exists());
 }
 

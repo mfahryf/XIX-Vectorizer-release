@@ -40,7 +40,10 @@ impl LicenseManager {
 
     pub fn with_client(dir: &Path, client: LicenseClient) -> Result<Self, LicenseError> {
         let store = LicenseStore::new(dir);
-        let state = store.load()?;
+        let mut state = store.load()?;
+        if state.trial.migrate_legacy() {
+            store.save(&state)?;
+        }
         Ok(Self {
             dir: dir.to_path_buf(),
             store,
@@ -209,6 +212,7 @@ impl LicenseManager {
             .clone()
             .unwrap_or_else(|| if local.lease.is_some() { "bound" } else { "registered" }.into());
         status.trial_remaining_by_engine = local.trial.remaining_by_engine();
+        status.trial_remaining = local.trial.total_remaining();
         status.license_key_fingerprint = local.license_key_fingerprint;
         status.reason = local.server_reason.clone();
         status.server_time = local.last_server_time;
@@ -348,7 +352,9 @@ impl LicenseManager {
             state.server_provider_status = claim.status.provider_status.clone();
             state.server_subscription_status = claim.status.subscription_status.clone();
             state.server_access_status = claim.status.access_status.clone();
-            if !claim.status.trial_remaining_by_engine.is_empty() {
+            if let Some(remaining) = claim.status.trial_remaining {
+                state.trial.set_remaining(remaining);
+            } else if !claim.status.trial_remaining_by_engine.is_empty() {
                 state
                     .trial
                     .set_remaining_by_engine(&claim.status.trial_remaining_by_engine);
@@ -391,7 +397,9 @@ impl LicenseManager {
         state.server_provider_status = response.provider_status;
         state.server_subscription_status = response.subscription_status;
         state.server_access_status = response.access_status;
-        if !response.trial_remaining_by_engine.is_empty() {
+        if let Some(remaining) = response.trial_remaining {
+            state.trial.merge_remaining(remaining);
+        } else if !response.trial_remaining_by_engine.is_empty() {
             state
                 .trial
                 .merge_remaining_by_engine(&response.trial_remaining_by_engine);
@@ -428,7 +436,7 @@ impl LicenseManager {
                 .map(|lease| lease.is_valid_for(PRODUCT_ID, &device_fingerprint, now))
                 .unwrap_or(false);
         if !paid_active && !state.trial.record_success(engine_id, &record.event_id) {
-            return Err(LicenseError::Locked("trial engine ini sudah habis".into()));
+            return Err(LicenseError::Locked("trial ini sudah habis".into()));
         }
         state.usage.record(record);
         self.store.save(&state)

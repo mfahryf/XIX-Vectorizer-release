@@ -6,6 +6,7 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const PRODUCT_ID: &str = "xix-vectorizer";
 pub const ENGINE_IDS: [&str; 3] = ["vectorize-v1", "vectorize-v2", "pngtosvg"];
 pub const TRIAL_FILE_LIMIT: u8 = 5;
+pub const TRIAL_TOTAL_LIMIT: u8 = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -50,6 +51,10 @@ impl Default for EngineTrial {
 pub struct TrialState {
     pub engines: BTreeMap<String, EngineTrial>,
     pub claimed_at: Option<i64>,
+    #[serde(default)]
+    pub successful_files: u8,
+    #[serde(default)]
+    pub usage_event_ids: BTreeSet<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -71,6 +76,8 @@ pub struct GatewayStatus {
     pub device_state: Option<String>,
     #[serde(default)]
     pub trial_remaining_by_engine: BTreeMap<String, u8>,
+    #[serde(default)]
+    pub trial_remaining: Option<u8>,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
     pub subscription_expires_at: Option<i64>,
     #[serde(default, deserialize_with = "deserialize_optional_timestamp")]
@@ -106,14 +113,41 @@ impl TrialState {
         Self {
             engines,
             claimed_at: None,
+            successful_files: 0,
+            usage_event_ids: BTreeSet::new(),
         }
     }
 
     pub fn remaining(&self, engine_id: &str) -> u8 {
-        self.engines
-            .get(engine_id)
-            .map(|engine| TRIAL_FILE_LIMIT.saturating_sub(engine.successful_files))
-            .unwrap_or(0)
+        if self.engines.contains_key(engine_id) {
+            self.total_remaining()
+        } else {
+            0
+        }
+    }
+
+    pub fn total_remaining(&self) -> u8 {
+        TRIAL_TOTAL_LIMIT.saturating_sub(self.successful_files)
+    }
+
+    /// Convert the old per-engine counters into the new shared counter once.
+    /// The old fields remain in the file so existing installations can be
+    /// upgraded without losing their trial history.
+    pub fn migrate_legacy(&mut self) -> bool {
+        let legacy_successes = self
+            .engines
+            .values()
+            .map(|engine| engine.successful_files)
+            .fold(0_u8, |total, value| total.saturating_add(value))
+            .min(TRIAL_TOTAL_LIMIT);
+        let previous_events = self.usage_event_ids.len();
+        for engine in self.engines.values() {
+            self.usage_event_ids
+                .extend(engine.usage_event_ids.iter().cloned());
+        }
+        let previous_successes = self.successful_files;
+        self.successful_files = self.successful_files.max(legacy_successes);
+        self.successful_files != previous_successes || self.usage_event_ids.len() != previous_events
     }
 
     pub fn is_locked(&self, engine_id: &str) -> bool {
@@ -121,16 +155,24 @@ impl TrialState {
     }
 
     pub fn record_success(&mut self, engine_id: &str, usage_event_id: &str) -> bool {
-        let Some(engine) = self.engines.get_mut(engine_id) else {
+        if !self.engines.contains_key(engine_id) {
             return false;
-        };
-        if engine.usage_event_ids.contains(usage_event_id)
-            || engine.successful_files >= TRIAL_FILE_LIMIT
+        }
+        if self.usage_event_ids.contains(usage_event_id)
+            || self.successful_files >= TRIAL_TOTAL_LIMIT
         {
             return false;
         }
+        let Some(engine) = self.engines.get_mut(engine_id) else {
+            return false;
+        };
+        if engine.usage_event_ids.contains(usage_event_id) {
+            return false;
+        }
+        self.usage_event_ids.insert(usage_event_id.to_string());
         engine.usage_event_ids.insert(usage_event_id.to_string());
         engine.successful_files = engine.successful_files.saturating_add(1);
+        self.successful_files = self.successful_files.saturating_add(1);
         true
     }
 
@@ -146,7 +188,7 @@ impl TrialState {
             return AccessDecision::denied(
                 engine_id,
                 remaining,
-                format!("trial engine ini tersisa {remaining} file berhasil"),
+                format!("trial tersisa {remaining} file berhasil"),
             );
         }
         AccessDecision::allowed(engine_id, remaining)
@@ -157,34 +199,45 @@ impl TrialState {
     }
 
     pub fn set_remaining_by_engine(&mut self, remaining: &BTreeMap<String, u8>) {
-        for (engine_id, engine) in &mut self.engines {
-            if let Some(remaining) = remaining.get(engine_id) {
-                engine.successful_files =
-                    TRIAL_FILE_LIMIT.saturating_sub((*remaining).min(TRIAL_FILE_LIMIT));
-            }
-        }
+        let total_remaining = remaining
+            .values()
+            .copied()
+            .fold(0_u8, u8::saturating_add)
+            .min(TRIAL_TOTAL_LIMIT);
+        self.set_remaining(total_remaining);
+    }
+
+    pub fn set_remaining(&mut self, remaining: u8) {
+        self.successful_files = self
+            .successful_files
+            .max(TRIAL_TOTAL_LIMIT.saturating_sub(remaining.min(TRIAL_TOTAL_LIMIT)));
     }
 
     /// Merge a server snapshot without undoing successful files that were
     /// completed locally but are still waiting to be synchronized.
     pub fn merge_remaining_by_engine(&mut self, remaining: &BTreeMap<String, u8>) {
-        for (engine_id, engine) in &mut self.engines {
-            if let Some(remaining) = remaining.get(engine_id) {
-                let server_successes =
-                    TRIAL_FILE_LIMIT.saturating_sub((*remaining).min(TRIAL_FILE_LIMIT));
-                engine.successful_files = engine.successful_files.max(server_successes);
-            }
-        }
+        let total_remaining = remaining
+            .values()
+            .copied()
+            .fold(0_u8, u8::saturating_add)
+            .min(TRIAL_TOTAL_LIMIT);
+        self.merge_remaining(total_remaining);
+    }
+
+    pub fn merge_remaining(&mut self, remaining: u8) {
+        self.successful_files = self
+            .successful_files
+            .max(TRIAL_TOTAL_LIMIT.saturating_sub(remaining.min(TRIAL_TOTAL_LIMIT)));
     }
 
     pub fn remaining_by_engine(&self) -> BTreeMap<String, u8> {
-        self.engines
-            .keys()
-            .map(|engine_id| (engine_id.clone(), self.remaining(engine_id)))
-            .collect()
+        BTreeMap::new()
     }
 
     pub fn matches_token(&self, token: &TrialToken) -> bool {
+        if let Some(remaining) = token.payload.get("trial_remaining").and_then(Value::as_u64) {
+            return u64::from(self.total_remaining()) <= remaining;
+        }
         let Some(counters) = token
             .payload
             .get("trial_remaining_by_engine")
@@ -192,14 +245,12 @@ impl TrialState {
         else {
             return false;
         };
-        self.engines.iter().all(|(engine_id, engine)| {
-            counters
-                .get(engine_id)
-                .and_then(Value::as_u64)
-                .is_some_and(|remaining| {
-                    u64::from(TRIAL_FILE_LIMIT.saturating_sub(engine.successful_files)) <= remaining
-                })
-        })
+        let remaining = counters
+            .values()
+            .filter_map(Value::as_u64)
+            .fold(0_u64, u64::saturating_add)
+            .min(u64::from(TRIAL_TOTAL_LIMIT));
+        u64::from(self.total_remaining()) <= remaining
     }
 }
 
@@ -289,6 +340,8 @@ pub struct LicenseStatus {
     pub lease_expires_at: Option<i64>,
     pub device_state: String,
     pub trial_remaining_by_engine: BTreeMap<String, u8>,
+    #[serde(default)]
+    pub trial_remaining: u8,
     pub reason: Option<String>,
     pub server_time: Option<i64>,
     pub key_id: Option<String>,
@@ -318,6 +371,7 @@ impl LicenseStatus {
             lease_expires_at: None,
             device_state: "unregistered".into(),
             trial_remaining_by_engine: trial.remaining_by_engine(),
+            trial_remaining: TRIAL_TOTAL_LIMIT,
             reason: None,
             server_time: None,
             key_id: None,
