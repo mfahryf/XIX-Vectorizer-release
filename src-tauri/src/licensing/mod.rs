@@ -418,6 +418,21 @@ impl LicenseManager {
         output: &Path,
     ) -> Result<(), LicenseError> {
         let record = UsageRecord::from_paths(engine_id, input, output)?;
+        self.record_usage_record(record)
+    }
+
+    pub fn record_success_with_event_id(
+        &self,
+        engine_id: &str,
+        input: &Path,
+        output: &Path,
+        event_id: &str,
+    ) -> Result<(), LicenseError> {
+        let record = UsageRecord::from_paths_with_event_id(engine_id, input, output, event_id)?;
+        self.record_usage_record(record)
+    }
+
+    fn record_usage_record(&self, record: UsageRecord) -> Result<(), LicenseError> {
         let device_fingerprint = self.load_identity()?.fingerprint();
         let mut state = self.state.lock();
         if state
@@ -435,7 +450,11 @@ impl LicenseManager {
                 .as_ref()
                 .map(|lease| lease.is_valid_for(PRODUCT_ID, &device_fingerprint, now))
                 .unwrap_or(false);
-        if !paid_active && !state.trial.record_success(engine_id, &record.event_id) {
+        if !paid_active
+            && !state
+                .trial
+                .record_success(&record.engine_id, &record.event_id)
+        {
             return Err(LicenseError::Locked("trial ini sudah habis".into()));
         }
         state.usage.record(record);

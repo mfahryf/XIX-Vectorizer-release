@@ -19,6 +19,31 @@ impl UsageRecord {
         let input_fingerprint = fingerprint_file(input)?;
         let output_fingerprint = fingerprint_file(output)?;
         let event_id = stable_event_id(engine_id, &input_fingerprint, &output_fingerprint);
+        Self::from_fingerprints(engine_id, input_fingerprint, output_fingerprint, event_id)
+    }
+
+    pub fn from_paths_with_event_id(
+        engine_id: &str,
+        input: &Path,
+        output: &Path,
+        event_id: &str,
+    ) -> Result<Self, LicenseError> {
+        let input_fingerprint = fingerprint_file(input)?;
+        let output_fingerprint = fingerprint_file(output)?;
+        Self::from_fingerprints(
+            engine_id,
+            input_fingerprint,
+            output_fingerprint,
+            event_id.to_string(),
+        )
+    }
+
+    fn from_fingerprints(
+        engine_id: &str,
+        input_fingerprint: String,
+        output_fingerprint: String,
+        event_id: String,
+    ) -> Result<Self, LicenseError> {
         Ok(Self {
             event_id,
             engine_id: engine_id.to_string(),
@@ -55,6 +80,17 @@ impl UsageLedger {
         output: &Path,
     ) -> Result<bool, LicenseError> {
         let record = UsageRecord::from_paths(engine_id, input, output)?;
+        Ok(self.record(record))
+    }
+
+    pub fn record_success_with_event_id(
+        &mut self,
+        engine_id: &str,
+        input: &Path,
+        output: &Path,
+        event_id: &str,
+    ) -> Result<bool, LicenseError> {
+        let record = UsageRecord::from_paths_with_event_id(engine_id, input, output, event_id)?;
         Ok(self.record(record))
     }
 

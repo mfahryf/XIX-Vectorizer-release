@@ -59,7 +59,9 @@ ke production, jadi jangan disalin ke dokumen lain.
 | Fresh start, engine belum dipakai | Belum ada claim sebelum file pertama dimulai. |
 | Sepuluh file berhasil lintas engine | Trial habis untuk semua engine; lisensi diperlukan untuk melanjutkan. |
 | Lima file berhasil pada satu engine | Trial total berkurang lima; engine lain memakai sisa penghitung yang sama. |
-| File gagal, batal, atau retry idempoten | Kuota tidak berkurang dua kali. |
+| File gagal atau batal | Kuota tidak berkurang. |
+| Retry otomatis dari percobaan yang sama | ID event sama; kuota tidak berkurang dua kali. |
+| File yang sama diproses lagi | ID event baru; kuota berkurang satu lagi sampai total 10. |
 | Aktivasi kode Mayar valid | Semua engine terbuka dan kode tidak disimpan mentah di UI/config. |
 | Aktivasi di perangkat kedua | Ditolak sebagai `device-conflict`; tidak membuat binding kedua. |
 | Tutup lalu buka kembali aplikasi | State lisensi dan identitas perangkat tetap terbaca. Ini padanan uji logout/login untuk desktop yang memakai kode Mayar. |
@@ -84,19 +86,18 @@ ke production, jadi jangan disalin ke dokumen lain.
 
 ## Bukti rilis terbaru
 
-Pada 20 September 2026, perubahan trial bersama dan updater dirilis sebagai
-`v0.1.7` pada commit `6cafb3c` di repository publik
+Pada 20 September 2026, perbaikan ID pemakaian per percobaan, trial bersama,
+dan updater dirilis sebagai `v0.1.8` di repository publik
 `mfahryf/XIX-Vectorizer-release`. Gateway terkait sudah dideploy dari commit
 `6c6471f` dan health production tetap berhasil.
 
 Hasil pengujian otomatis pada release tersebut:
 
-- `npm run test:ui`: 22 lulus;
-- `cargo test --manifest-path src-tauri/Cargo.toml licensing::tests --lib`:
-  31 lulus;
+- `npm run test:ui`: 23 lulus;
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`: 156 lulus;
 - gateway `python -m pytest -q`: 131 lulus.
 
 Asset updater diverifikasi tanpa login: `latest.json` dan
 `Vectorizer-latest-x64-setup.exe` sama-sama mengembalikan HTTP `200`. Uji
-manual upgrade dari instalasi `v0.1.6` ke `v0.1.7` tetap menjadi pemeriksaan
+manual upgrade dari instalasi `v0.1.7` ke `v0.1.8` tetap menjadi pemeriksaan
 akhir sebelum release dinyatakan teruji penuh pada perangkat pengguna.

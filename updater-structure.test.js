@@ -38,3 +38,7 @@ test("native updater and process plugins are registered", () => {
   assert.match(rustSource, /plugin\(tauri_plugin_process::init\(\)\)/);
   assert.match(rustSource, /plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\)/);
 });
+
+test("frontend refreshes the license status after a batch completes", () => {
+  assert.match(mainSource, /listen\("batch:\/\/done"[\s\S]*?void loadLicenseStatus\(\);/);
+});

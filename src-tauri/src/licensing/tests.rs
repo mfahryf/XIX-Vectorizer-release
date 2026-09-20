@@ -312,6 +312,27 @@ fn usage_ledger_counts_each_successful_input_once_and_queues_sync() {
 }
 
 #[test]
+fn usage_ledger_counts_repeated_attempts_with_distinct_event_ids() {
+    let dir = tempfile_dir("usage-attempts");
+    let input = dir.join("input.png");
+    let output = dir.join("output.svg");
+    std::fs::write(&input, b"same-input").unwrap();
+    std::fs::write(&output, b"same-output").unwrap();
+
+    let mut ledger = UsageLedger::default();
+    let first = ledger
+        .record_success_with_event_id("vectorize-v1", &input, &output, "attempt-1")
+        .unwrap();
+    let second = ledger
+        .record_success_with_event_id("vectorize-v1", &input, &output, "attempt-2")
+        .unwrap();
+
+    assert!(first);
+    assert!(second);
+    assert_eq!(ledger.pending().len(), 2);
+}
+
+#[test]
 fn usage_record_event_id_is_stable_for_same_file_contents() {
     let dir = tempfile_dir("usage-stable");
     let input = dir.join("input.png");
@@ -593,6 +614,7 @@ fn file_done_contains_input_for_usage_deduplication() {
         input: "C:/in/a.png".into(),
         name: "a.png".into(),
         output: "C:/out/a.svg".into(),
+        usage_event_id: "attempt-1".into(),
     };
     match event {
         crate::batch::BatchEvent::FileDone { input, output, .. } => {

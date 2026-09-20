@@ -6,23 +6,28 @@ harus mengikuti pola yang sama dengan product ID dan engine masing-masing.
 
 ## Status implementasi 20 September 2026
 
-Perubahan trial bersama dan alur updater sudah diterapkan dan diverifikasi:
+Perubahan trial bersama, ID pemakaian per percobaan, dan alur updater sudah
+diterapkan dan diverifikasi:
 
 - Gateway production memakai commit `6c6471f` dan sudah sehat setelah deploy
   Coolify. Migrasi hanya menambahkan nilai trial bersama; product ID Mayar,
   harga, checkout URL, webhook, dan data lisensi berbayar tidak diubah.
 - Repository release publik adalah `mfahryf/XIX-Vectorizer-release`.
-- Release desktop terbaru adalah `v0.1.7` pada commit `6cafb3c`.
+- Release desktop terbaru adalah `v0.1.8` pada repository publik.
 - Metadata updater: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json`.
 - Installer stabil: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe`.
 - `latest.json` dan installer stabil sudah dapat diakses tanpa login dengan
-  status HTTP `200`; metadata berisi versi `0.1.7` dan signature.
+  status HTTP `200`; metadata berisi versi `0.1.8` dan signature.
 - Saat startup, aplikasi menampilkan pemberitahuan update terlebih dahulu.
   Instalasi hanya berjalan setelah pengguna memilih `Update now`; aplikasi
   kemudian restart setelah pemasangan selesai.
+- Pada `v0.1.8`, setiap percobaan pemrosesan yang berhasil mendapat
+  `usage_event_id` baru. File yang sama boleh dihitung lagi sebagai percobaan
+  baru; pengulangan dengan ID yang sama hanya dipakai untuk retry jaringan dari
+  percobaan yang sama.
 
-Verifikasi otomatis terakhir: gateway 131 test, UI desktop 22 test, dan test
-lisensi desktop 31 test semuanya lulus. Uji manual yang tersisa untuk setiap
+Verifikasi otomatis terakhir: gateway 131 test, UI desktop 23 test, dan seluruh
+test Rust desktop 156 test semuanya lulus. Uji manual yang tersisa untuk setiap
 release adalah membuka instalasi versi lama, memastikan modal update terlihat,
 memilih update, lalu memastikan state lisensi, identitas perangkat, dan
 counter trial tetap ada setelah restart.
@@ -109,7 +114,10 @@ signing private ke desktop.
 - Fresh install belum membuat claim sebelum file pertama.
 - Semua engine bersama-sama memiliki tepat sepuluh file berhasil selama trial.
 - Batch lebih besar dari sisa trial berhenti tepat setelah kuota habis.
-- File gagal, batal, dan duplicate event tidak mengurangi kuota kedua kali.
+- File gagal atau batal tidak mengurangi kuota. Retry otomatis dengan ID event
+  yang sama juga tidak mengurangi kuota kedua kali.
+- Dua percobaan sukses atas file yang sama memakai ID berbeda dan masing-masing
+  mengurangi satu kuota trial.
 - Key valid membuka semua engine dan tidak disimpan sebagai raw key.
 - Aktivasi pada device kedua ditolak.
 - Lease valid dapat dipakai offline maksimal 14 hari.

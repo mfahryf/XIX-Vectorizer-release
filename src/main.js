@@ -1121,6 +1121,7 @@ listen("batch://done", (e) => {
   st.textContent = fail > 0 ? `SELESAI (${fail} GAGAL)` : "DONE";
   st.className = fail > 0 ? "err" : "ok";
   saveConfig();
+  void loadLicenseStatus();
 });
 
 // ---------------- init ----------------

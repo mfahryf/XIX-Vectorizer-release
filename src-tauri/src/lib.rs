@@ -348,11 +348,18 @@ async fn start_batch(
             pause,
             trial_gate,
             move |ev| {
-                if let batch::BatchEvent::FileDone { input, output, .. } = &ev {
-                    if let Err(error) = usage_manager.record_success(
+                if let batch::BatchEvent::FileDone {
+                    input,
+                    output,
+                    usage_event_id,
+                    ..
+                } = &ev
+                {
+                    if let Err(error) = usage_manager.record_success_with_event_id(
                         &usage_engine_id,
                         Path::new(input),
                         Path::new(output),
+                        usage_event_id,
                     ) {
                         eprintln!("LICENSE USAGE ERROR: {error}");
                     }

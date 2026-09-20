@@ -29,6 +29,7 @@ pub enum BatchEvent {
         input: String,
         name: String,
         output: String,
+        usage_event_id: String,
     },
     FileFail {
         name: String,
@@ -268,6 +269,11 @@ where
                 total,
                 name: name.clone(),
             });
+            // Satu ID untuk satu percobaan pemrosesan. Jika percobaan yang
+            // sama diulang otomatis karena 403, ID ini tetap dipakai; jika
+            // user menjalankan file yang sama lagi, macro dipanggil kembali
+            // dan mendapat ID baru sehingga trial tetap terhitung.
+            let usage_event_id = uuid::Uuid::new_v4().to_string();
             // Ok: tandai sukses + emit FileDone. Dua jalur (biasa & retry 403)
             // berbagi kode ini; `name` di-clone karena dipakai lagi di cabang fail.
             macro_rules! mark_done {
@@ -277,6 +283,7 @@ where
                         input: file.0.to_string_lossy().replace('\\', "/"),
                         name: name.clone(),
                         output: output.to_string_lossy().replace('\\', "/"),
+                        usage_event_id: usage_event_id.clone(),
                     });
                 }};
             }
@@ -653,6 +660,40 @@ mod tests {
         );
         assert_eq!(fail, 0);
         assert_eq!(events.lock().unwrap().len(), 6); // 3 start + 3 done
+    }
+
+    #[tokio::test]
+    async fn repeated_processing_attempts_get_distinct_usage_event_ids() {
+        let dir = std::env::temp_dir().join("xix-batch-usage-attempts");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("same.png");
+        std::fs::write(&file, b"same input").unwrap();
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let ev = events.clone();
+
+        let result = run_batch(
+            factory_for(FakeEngine::ok),
+            vec![file.clone(), file],
+            &dir,
+            &test_opts(),
+            Arc::new(AtomicBool::new(false)),
+            Arc::new(AtomicBool::new(false)),
+            move |event| ev.lock().unwrap().push(event),
+        )
+        .await;
+
+        assert_eq!(result, (2, 0));
+        let ids: Vec<String> = events
+            .lock()
+            .unwrap()
+            .iter()
+            .filter_map(|event| match event {
+                BatchEvent::FileDone { usage_event_id, .. } => Some(usage_event_id.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(ids.len(), 2);
+        assert_ne!(ids[0], ids[1]);
     }
 
     /// Engine yang mengirim beberapa tick progress lewat sink sebelum sukses —
