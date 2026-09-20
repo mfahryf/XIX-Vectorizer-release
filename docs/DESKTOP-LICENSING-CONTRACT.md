@@ -4,6 +4,29 @@ Dokumen ini adalah panduan implementasi client desktop. Sumber kebenaran
 server berada di `XIX-Payment-Gateway/docs/API.md`. Aplikasi desktop lain
 harus mengikuti pola yang sama dengan product ID dan engine masing-masing.
 
+## Status implementasi 20 September 2026
+
+Perubahan trial bersama dan alur updater sudah diterapkan dan diverifikasi:
+
+- Gateway production memakai commit `6c6471f` dan sudah sehat setelah deploy
+  Coolify. Migrasi hanya menambahkan nilai trial bersama; product ID Mayar,
+  harga, checkout URL, webhook, dan data lisensi berbayar tidak diubah.
+- Repository release publik adalah `mfahryf/XIX-Vectorizer-release`.
+- Release desktop terbaru adalah `v0.1.7` pada commit `6cafb3c`.
+- Metadata updater: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json`.
+- Installer stabil: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe`.
+- `latest.json` dan installer stabil sudah dapat diakses tanpa login dengan
+  status HTTP `200`; metadata berisi versi `0.1.7` dan signature.
+- Saat startup, aplikasi menampilkan pemberitahuan update terlebih dahulu.
+  Instalasi hanya berjalan setelah pengguna memilih `Update now`; aplikasi
+  kemudian restart setelah pemasangan selesai.
+
+Verifikasi otomatis terakhir: gateway 131 test, UI desktop 22 test, dan test
+lisensi desktop 31 test semuanya lulus. Uji manual yang tersisa untuk setiap
+release adalah membuka instalasi versi lama, memastikan modal update terlihat,
+memilih update, lalu memastikan state lisensi, identitas perangkat, dan
+counter trial tetap ada setelah restart.
+
 ## Keputusan produk
 
 - Satu aplikasi desktop memiliki satu produk dan satu lisensi berlangganan

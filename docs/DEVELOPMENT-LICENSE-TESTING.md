@@ -81,3 +81,22 @@ ke production, jadi jangan disalin ke dokumen lain.
 - Uji kode Mayar tetap `ACTIVE` tetapi periode XIXLabs sudah berakhir: akses
   harus terkunci dengan pesan perpanjangan, bukan pesan kode Mayar kadaluarsa.
 - Uji build release terpisah setelah test development lulus.
+
+## Bukti rilis terbaru
+
+Pada 20 September 2026, perubahan trial bersama dan updater dirilis sebagai
+`v0.1.7` pada commit `6cafb3c` di repository publik
+`mfahryf/XIX-Vectorizer-release`. Gateway terkait sudah dideploy dari commit
+`6c6471f` dan health production tetap berhasil.
+
+Hasil pengujian otomatis pada release tersebut:
+
+- `npm run test:ui`: 22 lulus;
+- `cargo test --manifest-path src-tauri/Cargo.toml licensing::tests --lib`:
+  31 lulus;
+- gateway `python -m pytest -q`: 131 lulus.
+
+Asset updater diverifikasi tanpa login: `latest.json` dan
+`Vectorizer-latest-x64-setup.exe` sama-sama mengembalikan HTTP `200`. Uji
+manual upgrade dari instalasi `v0.1.6` ke `v0.1.7` tetap menjadi pemeriksaan
+akhir sebelum release dinyatakan teruji penuh pada perangkat pengguna.
