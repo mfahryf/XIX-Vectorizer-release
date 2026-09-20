@@ -28,6 +28,7 @@ test("license modal has an accessible close and escape handling", () => {
 
 test("license modal exposes the trial limit and public purchase action", () => {
   assert.match(html, /class="license-trial-label">Trial Limit:<\/div>/);
+  assert.match(html, /id="license-expiry"/);
   assert.match(html, /id="license-buy"[^>]*aria-label="Get License"[^>]*>Get License<\/button>/);
   assert.match(html, /id="license-activate"[^>]*>ACTIVATE<\/button>/);
   assert.match(script, /LICENSE_PURCHASE_URL/);
@@ -35,6 +36,7 @@ test("license modal exposes the trial limit and public purchase action", () => {
   assert.match(script, /invoke\("license_purchase_url"\)/);
   assert.match(script, /openUrl\(await resolveLicensePurchaseUrl\(\)\)/);
   assert.match(script, /\$\("license-help"\)\.textContent = view\.canProcess[\s\S]*?view\.helpMessage/);
+  assert.match(script, /view\.expiryText/);
   assert.doesNotMatch(script, /Belum diaktifkan\./);
   assert.match(script, /focusable = \[[\s\S]*?\$\("license-buy"\)/);
   assert.match(script, /licenseBuy\.disabled = true/);

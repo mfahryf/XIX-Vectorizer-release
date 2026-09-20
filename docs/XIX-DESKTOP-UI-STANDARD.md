@@ -177,7 +177,7 @@ Untuk Vectorizer, repository release adalah
 dan link installer stabilnya adalah
 `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe`.
 
-Status release yang sudah diverifikasi pada 20 September 2026 adalah `v0.1.9`.
+Status release yang sudah diverifikasi pada 20 September 2026 adalah `v0.1.10`.
 Workflow GitHub Actions berhasil membuat installer Windows bertanda tangan,
 file signature, `latest.json`, dan alias installer stabil. Pemeriksaan HTTP
 tanpa login mengembalikan `200` untuk metadata dan installer. Modal update

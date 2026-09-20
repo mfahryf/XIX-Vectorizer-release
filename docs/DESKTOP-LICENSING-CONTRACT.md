@@ -13,15 +13,15 @@ diterapkan dan diverifikasi:
   Coolify. Migrasi hanya menambahkan nilai trial bersama; product ID Mayar,
   harga, checkout URL, webhook, dan data lisensi berbayar tidak diubah.
 - Repository release publik adalah `mfahryf/XIX-Vectorizer-release`.
-- Release desktop terbaru adalah `v0.1.9` pada repository publik.
+- Release desktop terbaru adalah `v0.1.10` pada repository publik.
 - Metadata updater: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/latest.json`.
 - Installer stabil: `https://github.com/mfahryf/XIX-Vectorizer-release/releases/latest/download/Vectorizer-latest-x64-setup.exe`.
 - `latest.json` dan installer stabil sudah dapat diakses tanpa login dengan
-  status HTTP `200`; metadata berisi versi `0.1.9` dan signature.
+  status HTTP `200`; metadata berisi versi `0.1.10` dan signature.
 - Saat startup, aplikasi menampilkan pemberitahuan update terlebih dahulu.
   Instalasi hanya berjalan setelah pengguna memilih `Update now`; aplikasi
   kemudian restart setelah pemasangan selesai.
-- Pada `v0.1.9`, setiap percobaan pemrosesan yang berhasil mendapat
+- Pada `v0.1.10`, setiap percobaan pemrosesan yang berhasil mendapat
   `usage_event_id` baru. File yang sama boleh dihitung lagi sebagai percobaan
   baru; pengulangan dengan ID yang sama hanya dipakai untuk retry jaringan dari
   percobaan yang sama.

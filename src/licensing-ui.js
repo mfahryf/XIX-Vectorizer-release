@@ -8,6 +8,19 @@
   const ENGINE_IDS = ["vectorize-v1", "vectorize-v2", "pngtosvg"];
   const TRIAL_TOTAL_LIMIT = 10;
 
+  function formatLicenseExpiry(value) {
+    const timestamp = Number(value);
+    if (!Number.isFinite(timestamp) || timestamp <= 0) return null;
+    const date = new Date(timestamp * 1000);
+    if (Number.isNaN(date.getTime())) return null;
+    return new Intl.DateTimeFormat("id-ID", {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+      timeZone: "UTC",
+    }).format(date);
+  }
+
   function deriveLicenseView(status) {
     const state = status && status.license_state ? status.license_state : "unavailable";
     const remaining = (status && status.trial_remaining_by_engine) || {};
@@ -82,6 +95,7 @@
       message,
       helpMessage,
       trialRemaining,
+      expiryText: formatLicenseExpiry(status && status.subscription_expires_at),
       engineCounters,
       deviceState: status && status.device_state ? status.device_state : "unknown",
       recoveryRequestCode: status && status.recovery_request_code

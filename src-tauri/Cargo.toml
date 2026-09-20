@@ -1,6 +1,6 @@
 [package]
 name = "xix-vectorizer"
-version = "0.1.9"
+version = "0.1.10"
 description = "XIX-Vectorizer - Winamp-themed batch vectorizer"
 edition = "2021"
 

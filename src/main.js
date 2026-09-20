@@ -43,6 +43,8 @@ function renderLicenseStatus(status) {
   const view = state.licenseView;
   $("license-badge").textContent = view.badge;
   $("license-status").textContent = view.message;
+  $("license-expiry").textContent = view.expiryText ? `Berakhir: ${view.expiryText}` : "";
+  $("license-expiry").classList.toggle("hidden", !view.expiryText);
   $("license-panel").classList.toggle("license-locked", !view.canProcess);
   $("license-trial-total").textContent = `TOTAL: ${view.trialRemaining}/10`;
   $("license-help").textContent = view.canProcess

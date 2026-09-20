@@ -87,7 +87,7 @@ ke production, jadi jangan disalin ke dokumen lain.
 ## Bukti rilis terbaru
 
 Pada 20 September 2026, perbaikan ID pemakaian per percobaan, trial bersama,
-dan updater dirilis sebagai `v0.1.9` di repository publik
+dan updater dirilis sebagai `v0.1.10` di repository publik
 `mfahryf/XIX-Vectorizer-release`. Gateway terkait sudah dideploy dari commit
 `6c6471f` dan health production tetap berhasil.
 
@@ -99,5 +99,5 @@ Hasil pengujian otomatis pada release tersebut:
 
 Asset updater diverifikasi tanpa login: `latest.json` dan
 `Vectorizer-latest-x64-setup.exe` sama-sama mengembalikan HTTP `200`. Uji
-manual upgrade dari instalasi `v0.1.8` ke `v0.1.9` tetap menjadi pemeriksaan
+manual upgrade dari instalasi `v0.1.9` ke `v0.1.10` tetap menjadi pemeriksaan
 akhir sebelum release dinyatakan teruji penuh pada perangkat pengguna.

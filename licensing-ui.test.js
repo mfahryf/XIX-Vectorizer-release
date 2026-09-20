@@ -31,6 +31,19 @@ test("active and offline leases remain usable without activation prompt", () => 
   }
 });
 
+test("licensed view exposes the subscription expiration date", () => {
+  const view = deriveLicenseView({
+    license_state: "licensed",
+    subscription_expires_at: Date.parse("2026-10-15T00:00:00Z") / 1000,
+  });
+  assert.equal(view.expiryText, "15 Oktober 2026");
+});
+
+test("license view omits an expiration date when the gateway has not provided one", () => {
+  const view = deriveLicenseView({ license_state: "licensed" });
+  assert.equal(view.expiryText, null);
+});
+
 test("fresh installs explain that processing activates the trial", () => {
   const view = deriveLicenseView({
     license_state: "unactivated",
