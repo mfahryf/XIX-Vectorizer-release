@@ -18,9 +18,22 @@
 use crate::engines::{Engine, EngineError, EngineOptions, OptionDef, OptionKind};
 use crate::net::http::BoxFuture;
 use crate::svg::fit::{ensure_viewbox, fit_to_bounds, sync_dimensions, FitMode};
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::{Mutex, OnceLock};
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+#[cfg(windows)]
+const CREATE_NO_WINDOW: u32 = 0x08000000;
+
+fn node_command(program: impl AsRef<OsStr>) -> Command {
+    let mut command = Command::new(program);
+    #[cfg(windows)]
+    command.creation_flags(CREATE_NO_WINDOW);
+    command
+}
 
 /// Bundled portable Node (set once at app startup via [`set_bundled_node`]
 /// from the resource dir). `None`/unset → fall back to a system install.
@@ -106,7 +119,12 @@ impl PngToSvgEngine {
             }
         }
         let found = bundled_node().or_else(|| {
-            if Command::new("node").arg("--version").output().map(|o| o.status.success()).unwrap_or(false) {
+            if node_command("node")
+                .arg("--version")
+                .output()
+                .map(|o| o.status.success())
+                .unwrap_or(false)
+            {
                 return Some("node".into());
             }
             None
@@ -197,7 +215,7 @@ impl Engine for PngToSvgEngine {
 
             // Runner writes the raw SVG to a temp path next to the output.
             let raw_path = out_dir.join(format!(".{base}.raw.svg"));
-            let out = Command::new(&node)
+            let out = node_command(&node)
                 .arg(&runner)
                 .arg(file)
                 .arg(&raw_path)
