@@ -60,12 +60,14 @@
       badge = "UNAVAILABLE";
       message = "Status lisensi sementara tidak tersedia.";
     }
+    const helpMessage = licensed ? "" : message;
     return {
       canProcess,
       canStart,
       showActivation: state !== "unavailable" && !licensed,
       badge,
       message,
+      helpMessage,
       engineCounters,
       deviceState: status && status.device_state ? status.device_state : "unknown",
       recoveryRequestCode: status && status.recovery_request_code

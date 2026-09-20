@@ -12,7 +12,7 @@ const win = getCurrentWindow();
 const APP_PALETTE = "sunset";
 // Native Mayar Software License checkout. The provider creates and delivers
 // the license code; the desktop only sends that code to the XIXLabs gateway.
-const LICENSE_PURCHASE_URL = "https://xixlabs.myr.wtf/pl/xix-vectorizer-monthly-license-92882";
+const LICENSE_PURCHASE_URL = "https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license";
 
 const state = {
   engine: null,
@@ -45,9 +45,8 @@ function renderLicenseStatus(status) {
   $("license-trial-v1").textContent = `V1: ${view.engineCounters[0].remaining}/5`;
   $("license-trial-v2").textContent = `V2: ${view.engineCounters[1].remaining}/5`;
   $("license-trial-v3").textContent = `V3: ${view.engineCounters[2].remaining}/5`;
-  const offline = view.offlineDaysRemaining == null ? "" : ` · offline ${view.offlineDaysRemaining} hari`;
   $("license-help").textContent = view.canProcess
-    ? `${view.message}${offline}`
+    ? view.helpMessage
     : view.recoveryRequestCode || state.license?.license_state === "unactivated"
       ? view.message
       : "Pemrosesan terkunci; file lama, pengaturan, dan bantuan tetap tersedia.";

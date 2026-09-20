@@ -31,6 +31,7 @@ test("active and offline leases remain usable without activation prompt", () => 
     const view = deriveLicenseView({ license_state: state });
     assert.equal(view.canProcess, true);
     assert.equal(view.showActivation, false);
+    assert.equal(view.helpMessage, "");
   }
 });
 

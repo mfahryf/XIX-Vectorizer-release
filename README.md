@@ -111,11 +111,10 @@ dibuat gateway. Gateway memisahkan status provider Mayar dari status langganan
 bulanan XIXLabs; status provider dapat tetap aktif ketika akses bulanan sudah
 berakhir.
 
-Untuk pilot, pakai pasangan yang sedang aktif di katalog gateway: Mayar product
-ID `c0bf5eb7-2cb2-4caf-9768-51f07dd54b22` dengan checkout
-`https://xixlabs.myr.lat/pl/xix-vectorizer-monthly-license`. Pasangan itu milik akun
-sandbox, dan katalog gateway adalah sumber kebenarannya, bukan halaman ini. Saat
-pindah ke production, ganti Mayar product ID dan checkout bersamaan mengikuti
-panduan di `XIX-Payment-Gateway/docs/PRODUCTION-CUTOVER.md`. Lakukan satu
-transaksi test, ambil kode dari halaman/email Mayar, lalu aktivasi pada satu
-komputer. Jangan memakai secret produksi di test lokal atau repository.
+Untuk production, pasangan katalog yang digunakan adalah Mayar product ID
+`4dbd3607-ba4e-491f-8751-95739c7c35b5` dengan checkout
+`https://xix-apps.myr.id/pl/xix-vectorizer-monthly-license`. Katalog gateway tetap
+menjadi sumber kebenaran; URL pada aplikasi hanya membuka halaman pembayaran.
+Pengujian sandbox mengikuti panduan terpisah di
+`docs/DEVELOPMENT-LICENSE-TESTING.md`. Jangan memakai secret produksi di test
+lokal atau repository.
