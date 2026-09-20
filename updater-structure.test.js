@@ -6,6 +6,7 @@ const path = require("node:path");
 const root = path.resolve(__dirname);
 const config = JSON.parse(fs.readFileSync(path.join(root, "src-tauri", "tauri.conf.json"), "utf8"));
 const mainSource = fs.readFileSync(path.join(root, "src", "main.js"), "utf8");
+const rustSource = fs.readFileSync(path.join(root, "src-tauri", "src", "lib.rs"), "utf8");
 
 test("desktop bundle produces signed updater artifacts for the public release repository", () => {
   assert.equal(config.bundle.createUpdaterArtifacts, true);
@@ -23,4 +24,10 @@ test("frontend checks, installs, and restarts after an available update", () => 
   assert.match(mainSource, /plugin:updater\|check/);
   assert.match(mainSource, /plugin:updater\|download_and_install/);
   assert.match(mainSource, /plugin:process\|restart/);
+  assert.match(mainSource, /void checkForUpdates\(\);/);
+});
+
+test("native updater and process plugins are registered", () => {
+  assert.match(rustSource, /plugin\(tauri_plugin_process::init\(\)\)/);
+  assert.match(rustSource, /plugin\(tauri_plugin_updater::Builder::new\(\)\.build\(\)\)/);
 });
