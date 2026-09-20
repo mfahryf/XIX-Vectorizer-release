@@ -403,6 +403,13 @@ body #titlebar-byline {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+body #titlebar-version {
+  color: var(--text-dim);
+  font-size: 7px;
+  font-weight: 500;
+  letter-spacing: 0.35px;
+  white-space: nowrap;
+}
 body .win-controls button {
   width: 16px; height: 16px;
   border-radius: 50%;
