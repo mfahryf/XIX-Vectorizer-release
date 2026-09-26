@@ -14,13 +14,13 @@ test("license controls live in a dedicated KeyRound modal", () => {
   assert.notEqual(modalStart, -1);
   assert.ok(licensePanel > modalStart);
   assert.ok(modalStart > settingsStart);
-  assert.match(html, /id="btn-license"[^>]*aria-label="Lisensi"/);
+  assert.match(html, /id="btn-license"[^>]*aria-label="License"/);
   assert.match(html, /id="btn-license"[\s\S]*?key-round/);
 });
 
 test("license modal has an accessible close and escape handling", () => {
   assert.match(html, /id="license-modal"[^>]*role="dialog"[^>]*aria-modal="true"/);
-  assert.match(html, /id="license-close"[^>]*aria-label="Tutup lisensi"/);
+  assert.match(html, /id="license-close"[^>]*aria-label="Close license"/);
   assert.match(script, /function openLicenseModal\(\)/);
   assert.match(script, /function closeLicenseModal\(\)/);
   assert.match(script, /event\.key === "Escape"/);
@@ -41,7 +41,7 @@ test("license modal exposes the trial limit and public purchase action", () => {
   assert.match(script, /focusable = \[[\s\S]*?\$\("license-buy"\)/);
   assert.match(script, /licenseBuy\.disabled = true/);
   assert.match(script, /licenseBuy\.setAttribute\("aria-busy", "true"\)/);
-  assert.match(script, /Membuka halaman lisensi…/);
+  assert.match(script, /Opening the license page…/);
   assert.match(style, /body #license-modal \.modal-title[\s\S]*?height: 30px;[\s\S]*?font-size: 9px;/);
   assert.doesNotMatch(style, /body #license-modal \.license-trial-label \{[^}]*text-transform:\s*uppercase;/);
 });

@@ -9,7 +9,7 @@ test("expired lease locks processing but leaves recovery actions", () => {
   });
   assert.equal(view.canProcess, false);
   assert.equal(view.showActivation, true);
-  assert.equal(view.message, "Hubungkan internet untuk memvalidasi lisensi.");
+  assert.equal(view.message, "Connect to the internet to validate your license.");
 });
 
 test("trial view exposes one shared counter for every engine", () => {
@@ -36,7 +36,7 @@ test("licensed view exposes the subscription expiration date", () => {
     license_state: "licensed",
     subscription_expires_at: Date.parse("2026-10-15T00:00:00Z") / 1000,
   });
-  assert.equal(view.expiryText, "15 Oktober 2026");
+  assert.equal(view.expiryText, "October 15, 2026");
 });
 
 test("license view omits an expiration date when the gateway has not provided one", () => {
@@ -70,12 +70,12 @@ test("device identity loss exposes recovery code and contact metadata", () => {
     license_state: "device-identity-lost",
     device_state: "identity-lost",
     recovery_request_code: "AB12CD34EF56",
-    recovery_contact: "hubungi admin lisensi XIXLabs",
+    recovery_contact: "contact XIXLabs license admin",
   });
   assert.equal(view.canProcess, false);
   assert.equal(view.badge, "RECOVERY");
   assert.equal(view.recoveryRequestCode, "AB12CD34EF56");
-  assert.equal(view.recoveryContact, "hubungi admin lisensi XIXLabs");
+  assert.equal(view.recoveryContact, "contact XIXLabs license admin");
   assert.equal(view.deviceState, "identity-lost");
 });
 
@@ -83,7 +83,7 @@ test("clock rollback is shown as a local validation problem", () => {
   const view = deriveLicenseView({ license_state: "clock-rollback" });
   assert.equal(view.canProcess, false);
   assert.equal(view.badge, "CLOCK CHECK");
-  assert.match(view.message, /waktu perangkat/i);
+  assert.match(view.message, /device clock/i);
 });
 
 test("temporarily unavailable status does not look like a fresh unactivated install", () => {
