@@ -37,6 +37,11 @@
       "icons/icon.ico",
       "icons/icon.icns"
     ],
+    "windows": {
+      "nsis": {
+        "installerIcon": "icons/icon.ico"
+      }
+    },
     "resources": ["pngtosvg-runtime/", "tor-runtime/"]
   },
   "plugins": {
