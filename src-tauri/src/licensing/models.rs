@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub const PRODUCT_ID: &str = "xix-vectorizer";
 pub const ENGINE_IDS: [&str; 3] = ["vectorize-v1", "vectorize-v2", "pngtosvg"];
-pub const TRIAL_FILE_LIMIT: u8 = 5;
+pub const TRIAL_FILE_LIMIT: u8 = 10;
 pub const TRIAL_TOTAL_LIMIT: u8 = 10;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

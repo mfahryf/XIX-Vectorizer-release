@@ -43,7 +43,7 @@ function renderLicenseStatus(status) {
   const view = state.licenseView;
   $("license-badge").textContent = view.badge;
   $("license-status").textContent = view.message;
-  $("license-expiry").textContent = view.expiryText ? `Berakhir: ${view.expiryText}` : "";
+  $("license-expiry").textContent = view.expiryText ? `Expires: ${view.expiryText}` : "";
   $("license-expiry").classList.toggle("hidden", !view.expiryText);
   $("license-panel").classList.toggle("license-locked", !view.canProcess);
   $("license-trial-total").textContent = `TOTAL: ${view.trialRemaining}/10`;
@@ -51,7 +51,7 @@ function renderLicenseStatus(status) {
     ? view.helpMessage
     : view.recoveryRequestCode || state.license?.license_state === "unactivated"
       ? view.message
-      : "Pemrosesan terkunci; file lama, pengaturan, dan bantuan tetap tersedia.";
+      : "Processing is locked; previous files, settings, and help remain available.";
   if (!state.running) setEnabled($("btn-start"), view.canStart);
 }
 async function loadLicenseStatus() {
@@ -63,12 +63,12 @@ async function loadLicenseStatus() {
     }
   } catch (error) {
     if (state.license && ["licensed", "licensed-offline"].includes(state.license.license_state)) {
-      $("license-status").textContent = "Status lisensi sementara tidak tersedia.";
+      $("license-status").textContent = "License status is temporarily unavailable.";
       console.warn("license status temporarily unavailable", error);
       return;
     }
     renderLicenseStatus({ license_state: "unavailable", trial_remaining: 0, trial_remaining_by_engine: {} });
-    $("license-status").textContent = "Status lisensi sementara tidak tersedia.";
+    $("license-status").textContent = "License status is temporarily unavailable.";
     console.warn("license status unavailable", error);
   }
 }
@@ -136,17 +136,17 @@ async function refreshLicense(showMessage = true) {
   try {
     const status = await invoke("refresh_license");
     renderLicenseStatus(status);
-    if (showMessage) setStatus("LISENSI DIVALIDASI", false);
+    if (showMessage) setStatus("LICENSE VALIDATED", false);
   } catch (error) {
-    if (showMessage) setStatus("VALIDASI LISENSI GAGAL", true);
-    $("license-status").textContent = "Hubungkan internet atau periksa kode lisensi Mayar.";
+    if (showMessage) setStatus("LICENSE VALIDATION FAILED", true);
+    $("license-status").textContent = "Connect to the internet or check the Mayar license code.";
   }
 }
 async function activateLicense() {
   const input = $("license-key");
   const licenseKey = input.value.trim();
   if (!licenseKey) {
-    $("license-status").textContent = "Masukkan kode lisensi dari hasil atau email pembayaran Mayar.";
+    $("license-status").textContent = "Enter the license code from your Mayar purchase or payment email.";
     return;
   }
   $("license-activate").disabled = true;
@@ -154,9 +154,9 @@ async function activateLicense() {
     const status = await invoke("activate_license", { licenseKey });
     input.value = "";
     renderLicenseStatus(status);
-    setStatus("LISENSI AKTIF", false);
+    setStatus("LICENSE ACTIVE", false);
   } catch (error) {
-    $("license-status").textContent = String(error || "Aktivasi lisensi gagal.");
+    $("license-status").textContent = String(error || "License activation failed.");
   } finally {
     $("license-activate").disabled = false;
   }
@@ -175,18 +175,18 @@ async function resolveLicensePurchaseUrl() {
 async function openLicensePurchase() {
   const licenseBuy = $("license-buy");
   if (!openUrl) {
-    $("license-status").textContent = "Halaman pembelian belum dapat dibuka.";
+    $("license-status").textContent = "Purchase page cannot be opened yet.";
     return;
   }
   licenseBuy.disabled = true;
   licenseBuy.setAttribute("aria-busy", "true");
   licenseBuy.textContent = "Opening…";
-  $("license-status").textContent = "Membuka halaman lisensi…";
+  $("license-status").textContent = "Opening the license page…";
   try {
     await openUrl(await resolveLicensePurchaseUrl());
-    setStatus("HALAMAN LISENSI DIBUKA", false);
+    setStatus("LICENSE PAGE OPENED", false);
   } catch (error) {
-    $("license-status").textContent = "Halaman pembelian belum dapat dibuka.";
+    $("license-status").textContent = "Purchase page cannot be opened yet.";
     console.warn("license purchase unavailable", error);
   } finally {
     licenseBuy.disabled = false;
@@ -359,7 +359,7 @@ function setBgFx(mode, persist = true) {
   document.body.classList.remove(...FX_MODES.map((f) => "fx-" + f.id));
   document.body.classList.add("fx-" + fx.id);
   const btn = $("btn-bg-fx");
-  btn.title = `Efek latar: ${fx.label.toLowerCase()} — klik untuk ganti`;
+  btn.title = `Background effect: ${fx.label.toLowerCase()} — click to change`;
   btn.querySelector(".fx-name").textContent = fx.label;
   if (persist) saveConfig();
 }
@@ -482,7 +482,7 @@ const ddScale = makeDropdown($("dd-scale"), updateLcdMeta);
 const ddFit = makeDropdown($("dd-fit"), updateLcdMeta);
 const ddProxyMode = makeDropdown($("dd-proxy-mode"));
 ddProxyMode.setOptions([
-  { value: "direct", label: "Langsung (tanpa proxy)" },
+  { value: "direct", label: "Direct (no proxy)" },
   { value: "user", label: "Pakai list proxy" },
   { value: "tor", label: "Tor (rotasi IP otomatis)" },
   { value: "free", label: "Gratis otomatis (HProxy+ProxyScrape)" },
@@ -674,7 +674,7 @@ function renderPlaylist(files) {
   const ul = $("pl-list");
   ul.innerHTML = "";
   state.files = files;
-  $("pl-count").textContent = `${files.length} file`;
+  $("pl-count").textContent = `${files.length} file${files.length === 1 ? "" : "s"}`;
   // total LCD langsung = jumlah file di playlist (0/total)
   updateCount(0, files.length);
   updateErrCount(0);
@@ -758,7 +758,7 @@ function updateErrCount(n) {
 function clearPlaylist() {
   $("pl-list").innerHTML = "";
   state.files = [];
-  $("pl-count").textContent = "0 file";
+  $("pl-count").textContent = "0 files";
   updateCount(0, 0);
   updateErrCount(0);
   setSeek(0);
@@ -778,7 +778,7 @@ function clearFinished() {
     if (doneNames.has(li.dataset.name)) li.remove();
   }
   state.files = state.files.filter((f) => !doneNames.has(f.name));
-  $("pl-count").textContent = `${state.files.length} file`;
+  $("pl-count").textContent = `${state.files.length} file${state.files.length === 1 ? "" : "s"}`;
   // total = sisa (failed + belum diproses); angka baris tetap (tidak reset ke 1)
   updateCount(0, state.files.length);
   updateErrCount(0);
@@ -790,7 +790,7 @@ function toggleClearMenu() {
   document.querySelectorAll(".dd-list:not(.hidden)").forEach((l) => l.classList.add("hidden"));
   if (opening) {
     const n = [...$("pl-list").children].filter((li) => li.classList.contains("done")).length;
-    $("cm-done").textContent = n ? `Hapus yang berhasil (${n})` : "Hapus yang berhasil";
+    $("cm-done").textContent = n ? `Clear successful (${n})` : "Clear successful";
     menu.classList.remove("hidden");
     document.addEventListener("mousedown", clearMenuOutside);
   } else {
@@ -809,7 +809,7 @@ async function start() {
   if (state.running) return;
   const output = $("cfg-output").value.trim();
   if (!state.files.length || !output) {
-    setStatus("PILIH FILE / FOLDER INPUT & ISI OUTPUT", true);
+    setStatus("SELECT INPUT FILES / FOLDER AND SET OUTPUT", true);
     setLcd("READY");
     return;
   }
@@ -819,14 +819,14 @@ async function start() {
       requestedFiles: state.files.length,
     });
     if (!decision.allowed) {
-      setStatus(decision.message || "PEMROSESAN TERKUNCI", true);
+      setStatus(decision.message || "PROCESSING LOCKED", true);
       if (state.license) {
         renderLicenseStatus({ ...state.license, license_state: decision.state, reason: decision.message });
       }
       return;
     }
   } catch (error) {
-    setStatus(String(error || "LISENSI BELUM TERVERIFIKASI"), true);
+    setStatus(String(error || "LICENSE NOT VERIFIED"), true);
     return;
   }
   state.running = true;
@@ -1115,12 +1115,12 @@ listen("batch://event", (e) => {
 });
 listen("batch://done", (e) => {
   const { ok, fail, total } = e.payload;
-  setLcd("SELESAI");
-  stopBatchUI(`selesai ${ok} · gagal ${fail} / ${total}`, fail > 0);
+  setLcd("FINISHED");
+  stopBatchUI(`finished ${ok} · failed ${fail} / ${total}`, fail > 0);
   updateCount(total, total);
   setSeek(100);
   const st = $("pl-status");
-  st.textContent = fail > 0 ? `SELESAI (${fail} GAGAL)` : "DONE";
+  st.textContent = fail > 0 ? `FINISHED (${fail} FAILED)` : "DONE";
   st.className = fail > 0 ? "err" : "ok";
   saveConfig();
   void loadLicenseStatus();
